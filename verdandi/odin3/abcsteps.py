@@ -125,7 +125,7 @@ def capture_abc_input(design: odin3.Design, k: int, workdir: Path) -> list[Path]
     copy = design.copy()
     try:
         with copy.odin3.capture_log():
-            copy.run_pass("abc", f"--lut {k} --via-blif {workdir}")
+            copy.run_pass("abc", f"--lut {k} --via-blif {_quoted(workdir)}")
     finally:
         copy.close()
     runs: list[tuple[int, Path]] = []

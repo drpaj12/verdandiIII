@@ -111,6 +111,20 @@ class CaptureTest(unittest.TestCase):
             finally:
                 design.close()
 
+    def test_capture_quotes_the_workdir(self) -> None:
+        # odin3 splits pass arguments on blanks unless the value is double-quoted.
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            workdir = Path(tmp) / "a dir" / "abc"
+            design = prepared_design(source)
+            try:
+                self.assertEqual(len(capture_abc_input(design, 6, workdir)), 1)
+            finally:
+                design.close()
+
 
 @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
 @unittest.skipUnless(HAVE_ABC, "a standalone ABC binary")

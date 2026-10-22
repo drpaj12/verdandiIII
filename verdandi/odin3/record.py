@@ -3,12 +3,14 @@
 The script is split on ``;``. Each command runs as one L1 pass step under an L0 stage step from
 ``stages.json`` (a pass the map does not list gets a stage titled by its name); the IR is
 snapshotted after it and diffed against the previous IR snapshot. ``read_verilog`` also gives
-two L2 children from the kept ASTs: "Parse" (PARSED) and "Elaborate" (ELABORATED). Every
-step carries a diff: an L1 IR step against the previous IR snapshot (by name across a
-renumbering pass), an L0 stage against the previous stage's final IR snapshot, and an L2 AST
-step the empty diff. A failing
-pass marks its step failed, writes the trace up to it and returns 1; a snapshot over
-``max_nodes`` refuses the recording and returns 2, naming the step.
+two L2 children from the kept ASTs: "Parse" (PARSED) and "Elaborate" (ELABORATED). An ``abc``
+pass with a standalone ABC binary gets one L2 child per script command (spec 6a): the same
+commands replayed on the BLIF the pass exchanges, illustrated by ABC's own picture and log.
+Every step carries a diff: an L1 IR step against the previous IR snapshot (by name across a
+renumbering pass), an L0 stage against the previous stage's final IR snapshot, an L2 AST step
+and an L2 ABC step the empty diff. A failing pass marks its step failed, writes the trace up
+to it and returns 1; a snapshot over ``max_nodes`` refuses the recording and returns 2, naming
+the step.
 """
 
 from __future__ import annotations
@@ -23,9 +25,16 @@ from pathlib import Path
 from typing import Any
 
 from verdandi.diff import diff
+from verdandi.odin3.abcsteps import (
+    TITLES,
+    abc_script,
+    capture_abc_input,
+    find_abc,
+    run_abc_steps,
+)
 from verdandi.odin3.locator import Locator
 from verdandi.odin3.snapshot import ast_snapshot, ir_snapshot, keep_all_asts, node_count
-from verdandi.trace import FORMAT_VERSION, CodeRef, Manifest, Step, save
+from verdandi.trace import FORMAT_VERSION, CodeRef, Diff, Manifest, Step, save
 
 _STAGES_FILE = Path(__file__).with_name("stages.json")
 
@@ -201,6 +210,37 @@ def _renumbers(name: str, command: str) -> bool:
     return name == "abc" or "compact" in command.split()
 
 
+def _lut_k(arguments: str, default: int) -> int:
+    """The ``--lut K`` value of an ``abc`` command, or the recording's K when it gives none."""
+    words = arguments.split()
+    for index, word in enumerate(words):
+        if word == "--lut" and index + 1 < len(words):
+            try:
+                return int(words[index + 1])
+            except ValueError:
+                return default
+    return default
+
+
+def _lut_count(snapshot: dict[str, Any]) -> int:
+    """The LUT node count of an IR snapshot (what the real ``abc`` pass mapped)."""
+    return sum(
+        1
+        for module in snapshot.get("modules", [])
+        for node in module.get("nodes", [])
+        if node.get("type") == "$lut"
+    )
+
+
+def _no_abc_warning() -> None:
+    """The one warning a recording without a standalone ABC binary prints (spec 9)."""
+    print(
+        "verdandi record: warning: no standalone ABC binary (ODIN3_ABC or "
+        "build/*/third_party/abc/abc under ODIN3_ROOT); the ABC stage has its L1 step only",
+        file=sys.stderr,
+    )
+
+
 def _new_step(
     steps: list[Step],
     *,
@@ -241,6 +281,9 @@ class _Recording:
         source_commit: str,
         library: Any,
         max_nodes: int,
+        abc: str | None,
+        k: int,
+        workdir: Path,
     ) -> None:
         self.files = files
         self.top = top
@@ -254,12 +297,17 @@ class _Recording:
         self.source_commit = source_commit
         self.library = library
         self.max_nodes = max_nodes
+        self.abc = abc
+        self.k = k
+        self.workdir = workdir
         self.steps: list[Step] = []
         self.snapshots: dict[str, dict[str, Any]] = {}
+        self.pictures: dict[str, Path] = {}
         self.previous: dict[str, Any] | None = None
         self.stage: Step | None = None
         self.stage_before: dict[str, Any] | None = None
         self.stage_by_name = False
+        self.warned_no_abc = False
 
     def run(self, commands: list[str]) -> int:
         """Record every command; 0 ok, 1 a pass failed, 2 a snapshot is over the size guard."""
@@ -305,6 +353,10 @@ class _Recording:
             anchor=f"pass:{name}",
             code=refs,
         )
+        abc_children: list[Step] = []
+        abc_stats: dict[str, int] = {}
+        if name == "abc":
+            abc_children, abc_stats = self._abc_children(step, design, arguments)
         error: Exception | None = None
         with self.library.capture_log() as records:
             try:
@@ -333,9 +385,69 @@ class _Recording:
         self.stage.snapshot = step.snapshot
         self.stage_by_name = self.stage_by_name or by_name
         self.stage.diff = diff(self.stage_before, snapshot, by_name=self.stage_by_name)
+        self._mark_illustrations(abc_children, abc_stats, snapshot)
         if name == "read_verilog":
             return self._ast_children(step, design, refs)
         return None
+
+    def _abc_children(
+        self, parent: Step, design: Any, arguments: str
+    ) -> tuple[list[Step], dict[str, int]]:
+        """The opened-up ABC steps (spec 6a): one L2 step per script command.
+
+        The commands replay on the BLIF the pass exchanges, captured from a copy of the design
+        before the real pass runs; each step gets ABC's own picture and log and no snapshot.
+        Without an ABC binary the ABC stage keeps its L1 step only and warns once; a capture
+        that fails warns too, rather than ending a recording the real pass may still complete.
+        """
+        if self.abc is None:
+            if not self.warned_no_abc:
+                self.warned_no_abc = True
+                _no_abc_warning()
+            return [], {}
+        k = _lut_k(arguments, self.k)
+        try:
+            inputs = capture_abc_input(design, k, self.workdir)
+            if not inputs:
+                return [], {}
+            abc_steps = run_abc_steps(
+                self.abc, inputs[0], abc_script(self.odin3_root, k), self.workdir
+            )
+        except (OSError, RuntimeError) as exc:
+            print(
+                f"verdandi record: warning: the ABC sub-steps are not available: {exc}",
+                file=sys.stderr,
+            )
+            return [], {}
+        if not abc_steps:
+            return [], {}
+        children: list[Step] = []
+        for abc_step in abc_steps:
+            word = abc_step.command.split()[0]
+            title = TITLES.get(word, abc_step.command)
+            child = _new_step(
+                self.steps, parent=parent.id, level=2, title=title, anchor=f"abc:{word}"
+            )
+            child.log = list(abc_step.log)
+            # An illustration still carries a diff, as an AST step does: the empty one.
+            child.diff = Diff(added=[], removed=[], changed=[], by_name=False)
+            if abc_step.dot.is_file():
+                name = f"{child.id}.dot"
+                self.pictures[name] = abc_step.dot
+                child.picture = name
+            children.append(child)
+        return children, abc_steps[-1].stats
+
+    @staticmethod
+    def _mark_illustrations(
+        children: list[Step], stats: dict[str, int], snapshot: dict[str, Any]
+    ) -> None:
+        """Mark the ABC sub-steps when their LUT count differs from the real pass's."""
+        if not children or "nd" not in stats:
+            return
+        if stats["nd"] != _lut_count(snapshot):
+            for child in children:
+                child.illustration = True
 
     def _ast_children(self, parent: Step, design: Any, refs: list[CodeRef]) -> int | None:
         """Add the kept PARSED and ELABORATED ASTs as L2 children of the read_verilog step."""
@@ -376,7 +488,7 @@ class _Recording:
             stage_map_version=self.stage_version,
             recorded=datetime.now(UTC).isoformat(timespec="seconds"),
         )
-        save(self.out, manifest, self.steps, self.snapshots, list(self.files))
+        save(self.out, manifest, self.steps, self.snapshots, list(self.files), self.pictures)
 
 
 def record(
@@ -395,11 +507,12 @@ def record(
     """Record ``files`` through Odin III into the trace at ``out``; exit code as the CLI's.
 
     ``script`` replaces the default script. ``abc`` is the standalone ABC binary for the
-    opened-up ABC sub-steps (Task 7; not used yet). ``odin3_root`` is where the code locator
-    reads the source (None: the environment's ODIN3_ROOT, else no code locations); without a
-    git checkout the manifest's source commit is ``"unknown"`` and the run warns once.
+    opened-up ABC sub-steps (default: $ODIN3_ABC, else build/*/third_party/abc/abc under the
+    source tree; without one the ABC stage keeps its L1 step only and warns once).
+    ``odin3_root`` is where the code locator reads the source (None: the environment's
+    ODIN3_ROOT, else no code locations); without a git checkout the manifest's source commit
+    is ``"unknown"`` and the run warns once.
     """
-    _ = abc
     try:
         import odin3
 
@@ -420,6 +533,7 @@ def record(
         print(f"verdandi record: {exc}", file=sys.stderr)
         return 2
     root = odin3_root if odin3_root is not None else _env_root()
+    binary = abc if abc is not None else find_abc(root)
     locator = Locator(root)
     source_commit = locator.commit()
     if root is None or source_commit == "unknown":
@@ -464,6 +578,9 @@ def record(
             source_commit=source_commit,
             library=library,
             max_nodes=max_nodes,
+            abc=binary,
+            k=k,
+            workdir=Path(scratch) / "abc",
         )
         try:
             return recording.run(commands)

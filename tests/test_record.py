@@ -196,7 +196,12 @@ class RecorderTest(unittest.TestCase):
                 with contextlib.redirect_stderr(stderr):
                     code = record([source], top, out, techlib=library, odin3_root=None)
             self.assertEqual(code, 0)
-            warnings = [line for line in stderr.getvalue().splitlines() if "warning" in line]
+            # Task 7 adds its own warning (no standalone ABC binary) in this environment.
+            warnings = [
+                line
+                for line in stderr.getvalue().splitlines()
+                if "warning" in line and "no Odin III source tree" in line
+            ]
             self.assertEqual(len(warnings), 1, stderr.getvalue())
             self.assertIn("ODIN3_ROOT", warnings[0])
             trace = load(out)
@@ -215,7 +220,12 @@ class RecorderTest(unittest.TestCase):
             with contextlib.redirect_stderr(stderr):
                 code = record([source], top, out, techlib=library, odin3_root=root)
             self.assertEqual(code, 0)
-            warnings = [line for line in stderr.getvalue().splitlines() if "warning" in line]
+            # Task 7 adds its own warning (no standalone ABC binary) in this environment.
+            warnings = [
+                line
+                for line in stderr.getvalue().splitlines()
+                if "warning" in line and "no Odin III source tree" in line
+            ]
             self.assertEqual(len(warnings), 1, stderr.getvalue())
             self.assertIn("ODIN3_ROOT", warnings[0])
             trace = load(out)

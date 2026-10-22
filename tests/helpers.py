@@ -38,7 +38,10 @@ def abc_binary() -> str | None:
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)
     if ODIN3_ROOT is not None:
-        for candidate in sorted(ODIN3_ROOT.glob("build/*/third_party/abc/abc")):
+        found = sorted(ODIN3_ROOT.glob("build/*/third_party/abc/abc"),
+                       key=lambda path: (path.parent.parent.parent.name != "release",
+                                         str(path)))
+        for candidate in found:
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
     return None

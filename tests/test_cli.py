@@ -24,7 +24,11 @@ class CliTest(unittest.TestCase):
         self.assertEqual(ex.exception.code, 2)
 
     def test_subcommands_not_implemented_yet(self) -> None:
-        for name in ("record", "play", "check-notes", "info"):
+        # Every subcommand is still unwired at Task 1; drop each name from this
+        # loop in the task that wires it: Task 6 wires record and info, Task 9
+        # wires check-notes, Task 10 wires play.
+        unwired = ("record", "play", "check-notes", "info")
+        for name in unwired:
             with self.subTest(name=name):
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out):

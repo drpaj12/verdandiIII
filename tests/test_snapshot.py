@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-import odin3
-
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, IFELSE_REG, Micro
 from verdandi.odin3 import ast_snapshot, ir_snapshot, keep_all_asts, node_count
+
+if HAVE_ODIN3:
+    import odin3
+
+_ROOT = Path(__file__).resolve().parent.parent
 
 
 def write_micro(micro: Micro, directory: Path) -> Path:
@@ -118,3 +124,30 @@ class SnapshotTest(unittest.TestCase):
         self.assertIn(top, [root["name"] for root in elaborated["roots"]])
         self.assertGreater(node_count(parsed), 0)
         self.assertGreater(node_count(elaborated), 0)
+
+
+@unittest.skipIf(os.environ.get("VERDANDI_DISCOVERY_PROBE") == "1", "the probe's child")
+class DiscoveryTest(unittest.TestCase):
+    def test_discovery_skips_without_odin3(self) -> None:
+        """Discovery with no odin3 on the path skips its tests; it does not raise.
+
+        -S keeps site-packages (where the odin3 wheel lives) and PYTHONPATH is cleared, so the
+        child sees the binding as absent, as a machine without the wheel does.
+        """
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in ("PYTHONPATH", "ODIN3_ROOT", "ODIN3_LIB")
+        }
+        env["VERDANDI_DISCOVERY_PROBE"] = "1"
+        result = subprocess.run(
+            [sys.executable, "-S", "-m", "unittest", "discover", "-s", "tests", "-t", "."],
+            cwd=_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("skipped=", result.stderr)

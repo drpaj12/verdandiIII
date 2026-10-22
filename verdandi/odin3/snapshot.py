@@ -8,9 +8,11 @@ not part of a snapshot (they live only in ``manifest.json``).
 
 from __future__ import annotations
 
-from typing import Any
+import importlib
+from typing import TYPE_CHECKING, Any
 
-import odin3
+if TYPE_CHECKING:
+    import odin3
 
 _FORMS = ("PARSED", "ELABORATED")
 
@@ -74,10 +76,15 @@ def ir_snapshot(design: odin3.Design) -> dict[str, Any]:
 
 
 def _ast_stores(design: odin3.Design) -> list[odin3.Ast]:
-    """Every AST store the design holds, in the order it received them."""
+    """Every AST store the design holds, in the order it received them.
+
+    The binding is imported here, not at module level, so this module (and the package) imports
+    and test discovery skips, instead of raising, where odin3 is absent.
+    """
+    binding = importlib.import_module("odin3")
     count = int(design.get("odin3_design_get_ast_count", "uint32_t"))
     return [
-        odin3.Ast(design, design.get("odin3_design_get_ast_at", "odin3_ast *", index))
+        binding.Ast(design, design.get("odin3_design_get_ast_at", "odin3_ast *", index))
         for index in range(count)
     ]
 

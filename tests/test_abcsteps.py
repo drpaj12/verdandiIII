@@ -15,9 +15,30 @@ from unittest import mock
 from tests.helpers import HAVE_ABC, HAVE_ODIN3, ODIN3_ROOT, abc_binary
 from tests.micros import COUNTER2
 from tests.test_record import techlib, write_micro
-from verdandi.odin3.abcsteps import TITLES, abc_script, run_abc_steps
+from verdandi.odin3.abcsteps import (
+    TITLES,
+    abc_script,
+    capture_abc_input,
+    run_abc_steps,
+)
 from verdandi.odin3.record import record
 from verdandi.trace import Trace, load
+
+if HAVE_ODIN3:
+    import odin3
+
+
+def prepared_design(source: Path) -> odin3.Design:
+    """A design lowered to the soft logic the recorder has before its ``abc`` pass."""
+    library = techlib()
+    assert library is not None
+    design = odin3.Design()
+    design.run_pass("read_techlib", f'"{library}"')
+    design.run_pass("read_verilog", f'--nolatches --vtr-compat "{source}"')
+    for command in ("proc", "fsm", "opt", "flatten", "opt -full", "wreduce", "lower"):
+        name, _, arguments = command.partition(" ")
+        design.run_pass(name, arguments)
+    return design
 
 # A small two-level combinational network: enough soft logic for strash and if -K.
 BAND = """\
@@ -63,6 +84,34 @@ class StepsTest(unittest.TestCase):
                 )
 
 
+# A module with no soft logic: its abc pass writes no exchange run.
+PASS_THROUGH = "module pass_through(input a, output y);\n  assign y = a;\nendmodule\n"
+
+
+@unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
+class CaptureTest(unittest.TestCase):
+    def test_capture_clears_a_stale_run(self) -> None:
+        # A capture replays whatever BLIF it finds: a run that writes none must not resurface
+        # the previous capture's files.
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "abc"
+            design = prepared_design(write_micro(COUNTER2, Path(tmp)))
+            try:
+                self.assertEqual(len(capture_abc_input(design, 6, workdir)), 1)
+            finally:
+                design.close()
+            plain = Path(tmp) / "pass_through.v"
+            plain.write_text(PASS_THROUGH, encoding="utf-8")
+            design = prepared_design(plain)
+            try:
+                self.assertEqual(capture_abc_input(design, 6, workdir), [])
+            finally:
+                design.close()
+
+
 @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
 @unittest.skipUnless(HAVE_ABC, "a standalone ABC binary")
 class RecordedStepsTest(unittest.TestCase):
@@ -104,6 +153,40 @@ class RecordedStepsTest(unittest.TestCase):
                     picture.read_text(encoding="utf-8").startswith("digraph"), child.title
                 )
                 self.assertFalse(child.illustration, child.title)
+
+
+    def test_record_two_abc_commands(self) -> None:
+        # Each abc command captures and replays in its own directory: both L1 steps open up,
+        # and the second one's files do not overwrite the first one's.
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            out = Path(tmp) / "trace"
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; fsm; opt; flatten; opt -full; wreduce; lower; abc --lut 6; abc --lut 6"
+            )
+            code = record(
+                [source], top, out, techlib=library, script=script, odin3_root=ODIN3_ROOT
+            )
+            self.assertEqual(code, 0)
+            trace = load(out)
+            abc_steps = [step for step in trace.steps if step.anchor == "pass:abc"]
+            self.assertEqual(len(abc_steps), 2)
+            pictures: set[str] = set()
+            for abc_step in abc_steps:
+                children = trace.children(abc_step.id)
+                self.assertEqual(len(children), 7, abc_step.title)
+                pictures.update(str(child.picture) for child in children)
+            self.assertEqual(len(pictures), 14)
+            for name in pictures:
+                path = out / "pic" / name
+                self.assertTrue(path.is_file(), name)
+                self.assertTrue(path.read_text(encoding="utf-8").startswith("digraph"), name)
 
 
 @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")

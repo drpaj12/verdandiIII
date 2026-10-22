@@ -291,6 +291,7 @@ class _Recording:
         self.abc = abc
         self.k = k
         self.workdir = workdir
+        self.abc_captures = 0
         self.steps: list[Step] = []
         self.snapshots: dict[str, dict[str, Any]] = {}
         self.pictures: dict[str, Path] = {}
@@ -388,6 +389,8 @@ class _Recording:
 
         The commands replay on the BLIF the pass exchanges, captured from a copy of the design
         before the real pass runs; each step gets ABC's own picture and log and no snapshot.
+        Each ``abc`` command gets its own directory under the recording's workdir, so a second
+        capture neither replays an earlier BLIF nor overwrites the earlier command's pictures.
         Without an ABC binary the ABC stage keeps its L1 step only and warns once; a capture
         that fails warns too, rather than ending a recording the real pass may still complete.
         """
@@ -397,12 +400,14 @@ class _Recording:
                 _no_abc_warning()
             return [], {}
         k = _lut_k(arguments, self.k)
+        self.abc_captures += 1
+        workdir = self.workdir / f"abc{self.abc_captures}"
         try:
-            inputs = capture_abc_input(design, k, self.workdir)
+            inputs = capture_abc_input(design, k, workdir)
             if not inputs:
                 return [], {}
             abc_steps = run_abc_steps(
-                self.abc, inputs[0], abc_script(self.odin3_root, k), self.workdir
+                self.abc, inputs[0], abc_script(self.odin3_root, k), workdir
             )
         except (OSError, RuntimeError) as exc:
             print(

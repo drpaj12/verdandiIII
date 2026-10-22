@@ -114,9 +114,14 @@ def capture_abc_input(design: odin3.Design, k: int, workdir: Path) -> list[Path]
 
     One file per module and clock domain: the pass writes ``abc<N>.in.blif`` into its
     ``--via-blif`` directory (src/passes/abc/run.c, ``choose_dir`` and ``run_paths``), in run
-    order. The copy is closed before returning; the design is left unchanged.
+    order. The copy is closed before returning; the design is left unchanged. An earlier
+    capture's runs are removed first: the pass writes no file for a module with nothing to
+    map, and those runs must not resurface as this capture's input.
     """
     workdir.mkdir(parents=True, exist_ok=True)
+    for stale in workdir.glob("abc*.in.blif"):
+        if _INPUT_FILE.fullmatch(stale.name) is not None:
+            stale.unlink()
     copy = design.copy()
     try:
         with copy.odin3.capture_log():

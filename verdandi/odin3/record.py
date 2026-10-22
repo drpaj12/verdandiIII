@@ -6,6 +6,11 @@ snapshotted after it and diffed against the previous IR snapshot. ``read_verilog
 two L2 children from the kept ASTs: "Parse" (PARSED) and "Elaborate" (ELABORATED). An ``abc``
 pass with a standalone ABC binary gets one L2 child per script command (spec 6a): the same
 commands replayed on the BLIF the pass exchanges, illustrated by ABC's own picture and log.
+``proc``, ``fsm`` and ``opt`` also give L2 children (spec 4): their documented parts, run on a
+copy of the design before the pass, ``opt`` as its loop's iterations; the copy's steps are
+illustrations when its last result differs from the pass's. A pass with event patterns logs at
+DEBUG for its step, and each object-naming line becomes an L3 event child whose code ref is the
+line that logs it.
 Every step carries a diff: an L1 IR step against the previous IR snapshot (by name across a
 renumbering pass), an L0 stage against the previous stage's final IR snapshot, an L2 AST step
 and an L2 ABC step the empty diff. A failing pass marks its step failed, writes the trace up
@@ -33,11 +38,17 @@ from verdandi.odin3.abcsteps import (
     find_abc,
     run_abc_steps,
 )
+from verdandi.odin3.events import PATTERNS
+from verdandi.odin3.events import match as match_event
 from verdandi.odin3.locator import Locator
 from verdandi.odin3.snapshot import ast_snapshot, ir_snapshot, keep_all_asts, node_count
+from verdandi.odin3.substeps import ITERATION_PREFIX, SUBSTEPS, expand, matches
 from verdandi.trace import FORMAT_VERSION, CodeRef, Diff, Manifest, Step, save
 
 _STAGES_FILE = Path(__file__).with_name("stages.json")
+
+# The commands whose documented parts are recorded as L2 children (spec 4, L2; plan Task 8).
+_EXPANDED = frozenset(SUBSTEPS) | {"opt"}
 
 # A "-top" or "--top" word in a pass's usage line (not a longer option that ends in "top").
 _TOP_OPTION = re.compile(r"(?:^|\s)--?top(?:\s|=|$)")
@@ -186,7 +197,7 @@ def _env_root() -> Path | None:
 
 
 def _code_refs(locator: Locator, name: str, root: Path | None) -> list[CodeRef]:
-    """One CodeRef per registering file, the whole file (Task 8 refines to functions)."""
+    """One CodeRef per registering file, the whole file (an event's ref is the line that logs)."""
     refs: list[CodeRef] = []
     for path in locator.pass_files(name):
         end_line = 1
@@ -312,6 +323,16 @@ class _Recording:
         self.stage_before: dict[str, Any] | None = None
         self.stage_by_name = False
         self.warned_no_abc = False
+        self._code_cache: dict[str, list[CodeRef]] = {}
+        self._ref_cache: dict[tuple[str, str], list[CodeRef]] = {}
+
+    def _pass_refs(self, name: str) -> list[CodeRef]:
+        """The pass's code refs, computed once per recording."""
+        refs = self._code_cache.get(name)
+        if refs is None:
+            refs = _code_refs(self.locator, name, self.odin3_root)
+            self._code_cache[name] = refs
+        return refs
 
     def run(self, commands: list[str]) -> int:
         """Record every command; 0 ok, 1 a pass failed, 2 a snapshot is over the size guard."""
@@ -332,8 +353,9 @@ class _Recording:
     def _command(self, design: Any, command: str) -> int | None:
         """Record one script command; an exit code when the recording stops here.
 
-        The step log is the library's INFO-and-above records. A pass that only reports at
-        DEBUG, such as write_blif's writer report, records just its timing line.
+        The step log is the library's log records; a pass with event patterns runs at DEBUG
+        (capture_log restores the level) and its object-naming lines become L3 children. A pass
+        with documented parts also gets L2 children, run on a copy of the design before it ran.
         """
         parts = command.split(maxsplit=1)
         name = parts[0]
@@ -348,7 +370,7 @@ class _Recording:
                 self.steps, parent=None, level=0, title=stage_title, anchor=f"stage:{stage_title}"
             )
         assert self.stage is not None
-        refs = _code_refs(self.locator, name, self.odin3_root)
+        refs = self._pass_refs(name)
         step = _new_step(
             self.steps,
             parent=self.stage.id,
@@ -357,41 +379,158 @@ class _Recording:
             anchor=f"pass:{name}",
             code=refs,
         )
-        abc_children: list[Step] = []
-        abc_stats: dict[str, int] = {}
-        if name == "abc":
-            abc_children, abc_stats = self._abc_children(step, design, arguments)
-        error: Exception | None = None
-        with self.library.capture_log() as records:
-            try:
-                design.run_pass(name, arguments)
-            except Exception as exc:  # a failed pass ends the recording; its status says why
-                error = exc
-        step.log = [record.message for record in records]
-        if error is not None:
-            step.failed = True
-            why = next((line for line in reversed(step.log) if "failed" in line), None)
-            if why is None:
-                why = step.log[-1] if step.log else str(error)
-            print(f"verdandi record: step '{command}' failed: {why}", file=sys.stderr)
-            self._write()
-            return 1
-        snapshot = ir_snapshot(design)
-        over = _over_size(step.title, snapshot, self.max_nodes)
-        if over is not None:
-            print(f"verdandi record: {over}", file=sys.stderr)
-            return 2
-        step.snapshot = f"{step.id}.json"
-        self.snapshots[step.snapshot] = snapshot
-        by_name = _renumbers(name, command)
-        step.diff = diff(self.previous, snapshot, by_name=by_name)
-        self.previous = snapshot
-        self.stage.snapshot = step.snapshot
-        self.stage_by_name = self.stage_by_name or by_name
-        self.stage.diff = diff(self.stage_before, snapshot, by_name=self.stage_by_name)
-        self._mark_illustrations(abc_children, abc_stats, step.log)
-        if name == "read_verilog":
-            return self._ast_children(step, design, refs)
+        before_snapshot = self.previous
+        before = design.copy() if name in _EXPANDED else None
+        try:
+            abc_children: list[Step] = []
+            abc_stats: dict[str, int] = {}
+            if name == "abc":
+                abc_children, abc_stats = self._abc_children(step, design, arguments)
+            error: Exception | None = None
+            with self.library.capture_log() as records:
+                # A pass with events runs at DEBUG here (an expanded pass's events come from
+                # its sub-steps); capture_log restores the level when the block ends.
+                if name in PATTERNS and name not in _EXPANDED:
+                    self.library.call(
+                        "odin3_log_set_level", self.library.lib.ODIN3_LOG_DEBUG
+                    )
+                try:
+                    design.run_pass(name, arguments)
+                except Exception as exc:  # a failed pass ends the recording; its status says why
+                    error = exc
+            step.log = [record.message for record in records]
+            if error is not None:
+                step.failed = True
+                why = next((line for line in reversed(step.log) if "failed" in line), None)
+                if why is None:
+                    why = step.log[-1] if step.log else str(error)
+                print(f"verdandi record: step '{command}' failed: {why}", file=sys.stderr)
+                self._write()
+                return 1
+            snapshot = ir_snapshot(design)
+            over = _over_size(step.title, snapshot, self.max_nodes)
+            if over is not None:
+                print(f"verdandi record: {over}", file=sys.stderr)
+                return 2
+            step.snapshot = f"{step.id}.json"
+            self.snapshots[step.snapshot] = snapshot
+            by_name = _renumbers(name, command)
+            step.diff = diff(self.previous, snapshot, by_name=by_name)
+            self.previous = snapshot
+            self.stage.snapshot = step.snapshot
+            self.stage_by_name = self.stage_by_name or by_name
+            self.stage.diff = diff(self.stage_before, snapshot, by_name=self.stage_by_name)
+            self._mark_illustrations(abc_children, abc_stats, step.log)
+            if before is not None:
+                code = self._substeps(step, before, command, before_snapshot, snapshot)
+                if code is not None:
+                    return code
+            else:
+                self._events(step, name, step.log)
+            if name == "read_verilog":
+                return self._ast_children(step, design, refs)
+            return None
+        finally:
+            if before is not None:
+                before.close()
+
+    def _events(self, parent: Step, pass_name: str, log: list[str]) -> None:
+        """The log's object-naming DEBUG lines as L3 children of the pass's step (spec 4).
+
+        An event's code refs are the lines of the pass's files holding the format text before
+        its first ``%`` (spec 6), searched once per format. An event is a log line, not a
+        design state: it carries the empty diff, as an AST step does.
+        """
+        if pass_name not in PATTERNS:
+            return
+        files = self.locator.pass_files(pass_name)
+        for line in log:
+            found = match_event(pass_name, line)
+            if found is None:
+                continue
+            title, anchor, prefix = found
+            key = (pass_name, prefix)
+            refs = self._ref_cache.get(key)
+            if refs is None:
+                refs = self.locator.find_text(files, prefix)
+                self._ref_cache[key] = refs
+            child = _new_step(
+                self.steps,
+                parent=parent.id,
+                level=3,
+                title=title,
+                anchor=anchor,
+                code=list(refs),
+            )
+            child.diff = Diff(added=[], removed=[], changed=[], by_name=False)
+
+    def _substeps(
+        self,
+        parent: Step,
+        before: Any,
+        command: str,
+        before_snapshot: dict[str, Any] | None,
+        real_snapshot: dict[str, Any],
+    ) -> int | None:
+        """Record the command's documented parts as L2 children of its step (spec 4).
+
+        Each entry's diff chains from the one before it (the pass's own before snapshot first).
+        An iteration group carries its iteration's end snapshot; the sub-passes that follow it
+        sit at the same level, so their events keep level 3. The sub-steps are illustrations
+        when the last entry does not match the real pass's snapshot: the copy shows something
+        else than the pass did.
+        """
+        pass_name = command.split(maxsplit=1)[0]
+        try:
+            entries = expand(before, command)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(
+                f"verdandi record: warning: the sub-steps of '{command}' are not available: {exc}",
+                file=sys.stderr,
+            )
+            return None
+        if not entries:
+            return None
+        group: Step | None = None
+        chain = before_snapshot
+        created: list[Step] = []
+        for title, snapshot, log in entries:
+            over = _over_size(title, snapshot, self.max_nodes)
+            if over is not None:
+                print(f"verdandi record: {over}", file=sys.stderr)
+                return 2
+            sub_name = title.split(maxsplit=1)[0]
+            grouping = title.startswith(ITERATION_PREFIX)
+            if grouping:
+                step = _new_step(
+                    self.steps,
+                    parent=parent.id,
+                    level=2,
+                    title=title,
+                    anchor=f"pass:{pass_name}",
+                    code=self._pass_refs(pass_name),
+                )
+                group = step
+            else:
+                step = _new_step(
+                    self.steps,
+                    parent=parent.id if group is None else group.id,
+                    level=2,
+                    title=title,
+                    anchor=f"pass:{sub_name}",
+                    code=self._pass_refs(sub_name),
+                )
+            step.log = list(log)
+            step.snapshot = f"{step.id}.json"
+            self.snapshots[step.snapshot] = snapshot
+            step.diff = diff(chain, snapshot)
+            if not grouping:
+                chain = snapshot
+                self._events(step, sub_name, log)
+            created.append(step)
+        if not matches(entries[-1][1], real_snapshot):
+            for step in created:
+                step.illustration = True
         return None
 
     def _abc_children(

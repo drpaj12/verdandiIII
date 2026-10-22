@@ -37,6 +37,15 @@ endmodule
 """,
 )
 
+AND_ZERO: Micro = (
+    "and_zero",
+    """\
+module and_zero(input a, output y);
+  assign y = a & 1'b0;
+endmodule
+""",
+)
+
 PLAYTHROUGH: Micro = (
     "playthrough",
     """\

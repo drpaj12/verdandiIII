@@ -243,5 +243,35 @@ class TraceSafetyTest(unittest.TestCase):
                      pictures={"a.dot": source, "A.dot": source})
 
 
+class TraceAtomicSaveTest(unittest.TestCase):
+    def test_save_replaces_the_previous_trace_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            directory = Path(work) / "trace"
+            save(directory, make_manifest(), make_steps(), make_snapshots(), [])
+            stale = directory / "pic" / "old.dot"
+            stale.parent.mkdir()
+            stale.write_text("digraph G {\n}\n", encoding="utf-8")
+            save(directory, make_manifest(), [], {"s0001.json": {"kind": "ir"}}, [])
+            names = sorted(str(path.relative_to(directory)) for path in directory.rglob("*")
+                           if path.is_file())
+            self.assertEqual(names, ["manifest.json", "snap/s0001.json", "steps.json"])
+
+    def test_failed_save_keeps_the_previous_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            directory = Path(work) / "trace"
+            save(directory, make_manifest(), make_steps(), make_snapshots(), [])
+            changed = make_manifest()
+            changed.top = "other"
+            missing = Path(work) / "missing.dot"
+            with self.assertRaises(FileNotFoundError):
+                save(directory, changed, [], {}, [], pictures={"s0004.dot": missing})
+            trace = load(directory)
+            self.assertEqual(trace.manifest.top, "counter")
+            self.assertEqual(len(trace.steps), 5)
+            leftovers = [path.name for path in Path(work).iterdir()
+                         if path.name.startswith(f".{directory.name}")]
+            self.assertEqual(leftovers, [])
+
+
 if __name__ == "__main__":
     unittest.main()

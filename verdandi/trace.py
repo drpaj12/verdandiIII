@@ -7,7 +7,9 @@ steps, ``pic/``. JSON is deterministic: keys sorted, one-space indent, one trail
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import tempfile
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -124,26 +126,68 @@ def save(
     sources: list[Path],
     pictures: dict[str, Path] | None = None,
 ) -> None:
-    """Write a trace directory; snapshots are keyed by the names in ``Step.snapshot``."""
+    """Write a trace directory atomically.
+
+    The trace is written into a fresh temporary directory beside ``directory`` and
+    swapped in when complete, so a failure leaves a previous trace untouched.
+    An existing trace directory is replaced as a whole: files from an earlier save
+    that are not part of this trace do not survive.
+    """
     directory = Path(directory)
     _check_unique([_checked_name(name, "snapshot") for name in snapshots], "snapshot")
     _check_unique([_checked_name(name, "picture") for name in pictures or {}], "picture")
     _check_unique([source.name for source in sources], "source")
+    directory.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{directory.name}.tmp-", dir=directory.parent))
+    try:
+        _write_trace(staging, manifest, steps, snapshots, sources, pictures or {})
+        _swap_into_place(staging, directory)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def _write_trace(
+    directory: Path,
+    manifest: Manifest,
+    steps: list[Step],
+    snapshots: dict[str, dict[str, Any]],
+    sources: list[Path],
+    pictures: dict[str, Path],
+) -> None:
     snap_dir = directory / "snap"
     src_dir = directory / "src"
-    snap_dir.mkdir(parents=True, exist_ok=True)
-    src_dir.mkdir(parents=True, exist_ok=True)
+    snap_dir.mkdir()
+    src_dir.mkdir()
     _write_json(directory / "manifest.json", asdict(manifest))
     _write_json(directory / "steps.json", [asdict(step) for step in steps])
-    for name, snapshot in snapshots.items():
-        _write_json(snap_dir / name, snapshot)
-    for source in sources:
+    for name in sorted(snapshots):
+        _write_json(snap_dir / name, snapshots[name])
+    for source in sorted(sources, key=lambda path: path.name):
         shutil.copyfile(source, src_dir / source.name)
     if pictures:
         pic_dir = directory / "pic"
-        pic_dir.mkdir(parents=True, exist_ok=True)
-        for name, picture in pictures.items():
-            shutil.copyfile(picture, pic_dir / name)
+        pic_dir.mkdir()
+        for name in sorted(pictures):
+            shutil.copyfile(pictures[name], pic_dir / name)
+
+
+def _swap_into_place(staging: Path, target: Path) -> None:
+    """Move the finished trace in place, replacing an existing directory as a whole."""
+    if not target.exists():
+        os.replace(staging, target)
+        return
+    if not target.is_dir():
+        raise ValueError(f"trace path {str(target)!r} is not a directory")
+    previous = Path(tempfile.mkdtemp(prefix=f".{target.name}.old-", dir=target.parent))
+    previous.rmdir()
+    os.replace(target, previous)
+    try:
+        os.replace(staging, target)
+    except OSError:
+        os.replace(previous, target)
+        raise
+    shutil.rmtree(previous, ignore_errors=True)
 
 
 def load(directory: Path) -> Trace:

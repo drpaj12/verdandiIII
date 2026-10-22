@@ -1,0 +1,46 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  ODIN3_WHEEL: https://github.com/drpaj12/odin3/releases/download/v1.0.0/odin3-1.0.0-py3-none-linux_x86_64.whl
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install cffi "$ODIN3_WHEEL" PySide6 ruff mypy -e .
+      - run: ruff check .
+      - run: mypy --strict verdandi tests
+
+  test:
+    # The Odin III wheel and source are pinned to v1.0.0; ABC tests skip without a binary.
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/checkout@v4
+        with:
+          repository: drpaj12/odin3
+          ref: v1.0.0
+          path: odin3-src
+      - run: sudo apt-get update && sudo apt-get install -y graphviz
+      - run: pip install cffi "$ODIN3_WHEEL" PySide6 ruff mypy -e .
+      - run: python -m unittest discover -s tests -t . -v
+        env:
+          ODIN3_ROOT: ${{ github.workspace }}/odin3-src
+          QT_QPA_PLATFORM: offscreen

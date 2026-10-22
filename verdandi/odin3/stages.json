@@ -1,0 +1,16 @@
+{
+ "version": 1,
+ "stages": [
+  {"title": "Read architecture", "passes": ["read_arch", "read_techlib"]},
+  {"title": "Parse and elaborate", "passes": ["read_verilog"]},
+  {"title": "Processes", "passes": ["proc"]},
+  {"title": "State machines", "passes": ["fsm"]},
+  {"title": "Optimisation", "passes": ["opt"]},
+  {"title": "Flatten", "passes": ["flatten"]},
+  {"title": "Width reduction", "passes": ["wreduce"]},
+  {"title": "Hard-block mapping", "passes": ["hardmap", "partial_map"]},
+  {"title": "Lower", "passes": ["lower"]},
+  {"title": "ABC: logic optimisation and K-LUT mapping", "passes": ["abc"]},
+  {"title": "Write BLIF", "passes": ["write_blif"]}
+ ]
+}

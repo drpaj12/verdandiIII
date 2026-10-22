@@ -27,7 +27,7 @@ class CliTest(unittest.TestCase):
         # Every subcommand is still unwired at Task 1; drop each name from this
         # loop in the task that wires it: Task 6 wires record and info, Task 9
         # wires check-notes, Task 10 wires play.
-        unwired = ("record", "play", "check-notes", "info")
+        unwired = ("play", "check-notes")
         for name in unwired:
             with self.subTest(name=name):
                 out = io.StringIO()

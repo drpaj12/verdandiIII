@@ -389,6 +389,8 @@ class _Recording:
 
         The commands replay on the BLIF the pass exchanges, captured from a copy of the design
         before the real pass runs; each step gets ABC's own picture and log and no snapshot.
+        The replay follows run 0 only (the first module and clock domain): a multi-domain design's
+        later runs are not opened up, as the plan's Task 7 states.
         Each ``abc`` command gets its own directory under the recording's workdir, so a second
         capture neither replays an earlier BLIF nor overwrites the earlier command's pictures.
         Without an ABC binary the ABC stage keeps its L1 step only and warns once; a capture

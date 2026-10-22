@@ -160,6 +160,12 @@ def _over_size(title: str, snapshot: dict[str, Any], max_nodes: int) -> str | No
     return f"step '{title}' has {count} nodes, over --max-nodes {max_nodes}"
 
 
+def _renumbers(name: str, command: str) -> bool:
+    """True when a command renumbers object IDs: ``abc`` compacts internally, and so does the
+    ``compact`` pass; only names are stable across such a step, so its diff matches by name."""
+    return name == "abc" or "compact" in command.split()
+
+
 def _new_step(
     steps: list[Step],
     *,
@@ -274,7 +280,7 @@ class _Recording:
             return 2
         step.snapshot = f"{step.id}.json"
         self.snapshots[step.snapshot] = snapshot
-        step.diff = diff(self.previous, snapshot)
+        step.diff = diff(self.previous, snapshot, by_name=_renumbers(name, command))
         self.previous = snapshot
         self.stage.snapshot = step.snapshot
         if name == "read_verilog":

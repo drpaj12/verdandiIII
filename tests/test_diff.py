@@ -213,6 +213,39 @@ class DiffTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             diff(duplicate_names, duplicate_names, by_name=True)
 
+    def test_empty_names_match_by_occurrence(self) -> None:
+        # Odin III leaves internal cells and nets unnamed; by name they match in snapshot order.
+        before = ir(
+            module(
+                "top",
+                nodes=[node(1, ""), node(2, "")],
+                nets=[net(3, ""), net(4, "")],
+            )
+        )
+        after = ir(
+            module(
+                "top",
+                nodes=[node(10, ""), node(11, "")],
+                nets=[net(12, ""), net(13, "")],
+            )
+        )
+        self.assertEqual(
+            diff(before, after, by_name=True),
+            Diff(added=[], removed=[], changed=[], by_name=True),
+        )
+        shorter = ir(
+            module("top", nodes=[node(10, ""), node(11, "")], nets=[net(12, "")])
+        )
+        self.assertEqual(
+            diff(before, shorter, by_name=True),
+            Diff(
+                added=[],
+                removed=[ObjRef("top", "net", 4, "")],
+                changed=[],
+                by_name=True,
+            ),
+        )
+
     def test_empty_diff(self) -> None:
         snapshot = ir(
             module("top", nodes=[node(1, "a")], nets=[net(2, "n")], wires=[wire(3, "w")])

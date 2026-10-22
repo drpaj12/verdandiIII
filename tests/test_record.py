@@ -99,6 +99,64 @@ class RecorderTest(unittest.TestCase):
                 (out / "src" / f"{top}.v").read_text(encoding="utf-8"), text
             )
 
+    def test_record_counter_abc_diff_by_name(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            out = Path(tmp) / "trace"
+            code = record([source], top, out, techlib=library, odin3_root=ODIN3_ROOT)
+            self.assertEqual(code, 0)
+            trace = load(out)
+            steps = [step for step in trace.steps if step.anchor == "pass:abc"]
+            self.assertEqual(len(steps), 1)
+            step = steps[0]
+            self.assertIsNotNone(step.diff, "the abc step has no diff")
+            assert step.diff is not None
+            # v1.0.0: abc compacts the IDs; by name only its two $lut cells are new, and the
+            # cells and nets it removes are gone by name too (2 added, 24 removed, 11 changed).
+            self.assertTrue(step.diff.by_name)
+            self.assertEqual(len(step.diff.added), 2)
+            self.assertEqual(len(step.diff.removed), 24)
+            self.assertEqual(len(step.diff.changed), 11)
+            after = trace.snapshot(step)
+            assert after is not None
+            nodes = {
+                int(item["id"]): item
+                for module in after["modules"]
+                for item in module.get("nodes", [])
+            }
+            for ref in step.diff.added:
+                self.assertEqual(ref.kind, "node")
+                self.assertEqual(nodes[ref.id]["type"], "$lut")
+            removed = [ref for ref in step.diff.removed if ref.name]
+            self.assertNotIn("wire", {ref.kind for ref in removed})
+            self.assertNotIn("count.dff_p1", {ref.name for ref in removed})
+            self.assertNotIn("count.dff_p3", {ref.name for ref in removed})
+
+    def test_record_compact_step_diff_by_name(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; compact; proc"
+            )
+            out = Path(tmp) / "trace"
+            code = record([source], top, out, techlib=library, script=script)
+            self.assertEqual(code, 0)
+            trace = load(out)
+            steps = [step for step in trace.steps if step.anchor == "pass:compact"]
+            self.assertEqual(len(steps), 1)
+            step = steps[0]
+            self.assertIsNotNone(step.diff, "the compact step has no diff")
+            assert step.diff is not None
+            self.assertTrue(step.diff.by_name)
+            self.assertEqual(step.diff.added, [])
+            self.assertEqual(step.diff.removed, [])
+
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()
         top, _text = COUNTER2

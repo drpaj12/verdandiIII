@@ -2,7 +2,8 @@
 
 Objects are matched by ``(module, kind, id)`` within one design, or by
 ``(module, kind, name)`` when the caller asks for ``by_name``: across a ``compact`` pass the
-IDs are renumbered, so only names are stable. Under ``by_name`` the before-side references
+IDs are renumbered, so only names are stable. An unnamed object is matched by its occurrence
+in snapshot order (it has no name to match on). Under ``by_name`` the before-side references
 inside node pins and net drivers/sinks are remapped to the after-side IDs by name before the
 content is compared, so a pure renumbering is not a change. An AST snapshot (or any non-IR
 snapshot) has no object IDs to compare and diffs to an empty ``Diff``; the player shows AST
@@ -21,6 +22,12 @@ from verdandi.trace import Diff, ObjRef
 # Snapshot collection name -> object kind in an ObjRef, in snapshot order.
 _SINGULAR = {"nodes": "node", "nets": "net", "wires": "wire"}
 
+# A name key: the object's name, or for an unnamed object its (empty name, occurrence) pair.
+_NameKey = str | tuple[str, int]
+
+# One indexed object's key: module, kind and ID (or name key).
+_Key = tuple[str, str, int | _NameKey]
+
 # The fields whose change makes an object "changed"; sources are provenance, not content.
 _CHANGED_FIELDS: dict[str, tuple[str, ...]] = {
     "node": ("type", "params", "pins"),
@@ -31,23 +38,36 @@ _CHANGED_FIELDS: dict[str, tuple[str, ...]] = {
 
 def _index(
     snapshot: dict[str, Any], by_name: bool
-) -> dict[tuple[str, str, int | str], tuple[ObjRef, dict[str, Any]]]:
+) -> dict[_Key, tuple[ObjRef, dict[str, Any]]]:
     """The snapshot's objects keyed by module, kind and ID (or name).
 
-    A duplicate key raises ValueError: silently keeping one of the two objects would drop the
-    other from every list of the diff.
+    An unnamed object (Odin III leaves internal cells and nets unnamed) has no identity by
+    name, so by name each is keyed by its occurrence in snapshot order; a renumbering diff of
+    two snapshots with several such objects then does not raise. A duplicate non-empty key
+    raises ValueError: silently keeping one of the two objects would drop the other from every
+    list of the diff.
     """
-    index: dict[tuple[str, str, int | str], tuple[ObjRef, dict[str, Any]]] = {}
+    index: dict[_Key, tuple[ObjRef, dict[str, Any]]] = {}
+    occurrences: dict[tuple[str, str], int] = {}
     for module in snapshot.get("modules", []):
         module_name = str(module["name"])
         for plural, kind in _SINGULAR.items():
             for item in module.get(plural, []):
-                ident: int | str = str(item["name"]) if by_name else int(item["id"])
+                name = str(item["name"])
+                ident: int | _NameKey
+                if not by_name:
+                    ident = int(item["id"])
+                elif name:
+                    ident = name
+                else:
+                    occurrence = occurrences.get((module_name, kind), 0)
+                    occurrences[(module_name, kind)] = occurrence + 1
+                    ident = (name, occurrence)
                 ref = ObjRef(
                     module=module_name,
                     kind=kind,
                     id=int(item["id"]),
-                    name=str(item["name"]),
+                    name=name,
                 )
                 key = (module_name, kind, ident)
                 if key in index:
@@ -60,8 +80,8 @@ def _index(
 
 
 def _id_map(
-    before_index: dict[tuple[str, str, int | str], tuple[ObjRef, dict[str, Any]]],
-    after_index: dict[tuple[str, str, int | str], tuple[ObjRef, dict[str, Any]]],
+    before_index: dict[_Key, tuple[ObjRef, dict[str, Any]]],
+    after_index: dict[_Key, tuple[ObjRef, dict[str, Any]]],
     kind: str,
 ) -> dict[int, int]:
     """Before-ID to after-ID for the objects of ``kind`` matched by key."""

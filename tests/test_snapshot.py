@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, IFELSE_REG, Micro
@@ -52,6 +53,32 @@ def read_design(path: Path, *passes: str, keep_asts: bool = False) -> odin3.Desi
 
 @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
 class SnapshotTest(unittest.TestCase):
+    def assert_snapshot_complete(self, design: odin3.Design, snapshot: dict[str, Any]) -> None:
+        """Assert the snapshot lists every live object the IR counts.
+
+        Without this, a snapshot that silently dropped live objects would pass every other
+        test here; the module's counts are the library's own live totals.
+        """
+        modules = snapshot["modules"]
+        self.assertEqual(
+            [module_snapshot["name"] for module_snapshot in modules],
+            [module.name for module in design.modules()],
+            "modules in the snapshot",
+        )
+        for module_snapshot in modules:
+            module = design.module(module_snapshot["name"])
+            self.assertIsNotNone(module, f"{module_snapshot['name']}: not in the design")
+            assert module is not None
+            self.assertEqual(
+                len(module_snapshot["nodes"]), module.node_count(), f"{module.name}: nodes"
+            )
+            self.assertEqual(
+                len(module_snapshot["nets"]), module.net_count(), f"{module.name}: nets"
+            )
+            self.assertEqual(
+                len(module_snapshot["wires"]), module.wire_count(), f"{module.name}: wires"
+            )
+
     def test_counter_snapshot(self) -> None:
         top, text = COUNTER2
         always_line = next(
@@ -63,6 +90,7 @@ class SnapshotTest(unittest.TestCase):
             snapshot = ir_snapshot(design)
         self.assertEqual(snapshot["kind"], "ir")
         self.assertEqual([module["name"] for module in snapshot["modules"]], [top])
+        self.assert_snapshot_complete(design, snapshot)
         nodes = snapshot["modules"][0]["nodes"]
         dffs = [node for node in nodes if node["type"] == "$dff"]
         self.assertTrue(dffs, "no $dff after proc")
@@ -85,6 +113,7 @@ class SnapshotTest(unittest.TestCase):
             design = read_design(write_micro(COUNTER2, Path(tmp)), "proc", "opt", "opt_clean")
             self.addCleanup(design.close)
             snapshot = ir_snapshot(design)
+            self.assert_snapshot_complete(design, snapshot)
             listed = 0
             dead = 0
             for module_snapshot in snapshot["modules"]:
@@ -106,6 +135,18 @@ class SnapshotTest(unittest.TestCase):
                 )
         self.assertGreater(listed, 0)
         self.assertGreater(dead, 0, "opt_clean freed no slots: the skip is untested")
+
+    def test_completeness_rejects_a_dropped_node(self) -> None:
+        """The completeness assertion fails a snapshot that lost a live node."""
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            design = read_design(write_micro(COUNTER2, Path(tmp)), "proc")
+            self.addCleanup(design.close)
+            snapshot = ir_snapshot(design)
+        for module_snapshot in snapshot["modules"]:
+            module_snapshot["nodes"].pop()
+        with self.assertRaises(self.failureException):
+            self.assert_snapshot_complete(design, snapshot)
 
     def test_ast_forms(self) -> None:
         top, _text = COUNTER2

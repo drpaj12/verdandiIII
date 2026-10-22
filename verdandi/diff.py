@@ -32,7 +32,11 @@ _CHANGED_FIELDS: dict[str, tuple[str, ...]] = {
 def _index(
     snapshot: dict[str, Any], by_name: bool
 ) -> dict[tuple[str, str, int | str], tuple[ObjRef, dict[str, Any]]]:
-    """The snapshot's objects keyed by module, kind and ID (or name); later duplicates win."""
+    """The snapshot's objects keyed by module, kind and ID (or name).
+
+    A duplicate key raises ValueError: silently keeping one of the two objects would drop the
+    other from every list of the diff.
+    """
     index: dict[tuple[str, str, int | str], tuple[ObjRef, dict[str, Any]]] = {}
     for module in snapshot.get("modules", []):
         module_name = str(module["name"])
@@ -45,7 +49,13 @@ def _index(
                     id=int(item["id"]),
                     name=str(item["name"]),
                 )
-                index[(module_name, kind, ident)] = (ref, item)
+                key = (module_name, kind, ident)
+                if key in index:
+                    label = "name" if by_name else "id"
+                    raise ValueError(
+                        f"duplicate {kind} {label} {ident!r} in module {module_name!r}"
+                    )
+                index[key] = (ref, item)
     return index
 
 

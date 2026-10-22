@@ -156,6 +156,16 @@ class DiffTest(unittest.TestCase):
             ),
         )
 
+    def test_duplicate_keys_raise(self) -> None:
+        duplicate_ids = ir(module("top", nodes=[node(1, "a"), node(1, "b")]))
+        duplicate_names = ir(module("top", nodes=[node(1, "a"), node(2, "a")]))
+        with self.assertRaises(ValueError):
+            diff(duplicate_ids, ir())
+        with self.assertRaises(ValueError):
+            diff(ir(), duplicate_ids)
+        with self.assertRaises(ValueError):
+            diff(duplicate_names, duplicate_names, by_name=True)
+
     def test_empty_diff(self) -> None:
         snapshot = ir(
             module("top", nodes=[node(1, "a")], nets=[net(2, "n")], wires=[wire(3, "w")])

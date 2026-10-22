@@ -135,5 +135,41 @@ class OptFixedPointTest(unittest.TestCase):
         self.assertEqual(iterations[-1], iterations[-2], "the loop did not reach a fixed point")
 
 
+class IterationGroupSnapshotTest(unittest.TestCase):
+    @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
+    def test_iteration_group_shares_its_last_child_snapshot(self) -> None:
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(IFELSE_REG, Path(tmp))
+            out = Path(tmp) / "trace"
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; opt -full"
+            )
+            code = record(
+                [source], IFELSE_REG[0], out, techlib=library, script=script,
+                odin3_root=ODIN3_ROOT,
+            )
+            self.assertEqual(code, 0)
+            trace = load(out)
+            opt = next(s for s in trace.steps if s.anchor == "pass:opt" and s.level == 1)
+            groups = [
+                step for step in trace.children(opt.id) if step.title.startswith(ITERATION_PREFIX)
+            ]
+            self.assertTrue(groups, "no iteration group")
+            for group in groups:
+                children = trace.children(group.id)
+                self.assertTrue(children, group.title)
+                self.assertEqual(group.level, 2, group.title)
+                self.assertEqual(children[-1].level, 2, group.title)
+                # The group's end state is its last child's: one file, not two identical copies.
+                self.assertEqual(group.snapshot, children[-1].snapshot, group.title)
+                self.assertNotEqual(group.snapshot, f"{group.id}.json", group.title)
+                self.assertEqual(trace.snapshot(group), trace.snapshot(children[-1]), group.title)
+
+
 if __name__ == "__main__":
     unittest.main()

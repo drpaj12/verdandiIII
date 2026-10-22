@@ -488,10 +488,11 @@ class _Recording:
         """Record the command's documented parts as L2 children of its step (spec 4).
 
         Each entry's diff chains from the one before it (the pass's own before snapshot first).
-        An iteration group carries its iteration's end snapshot; the sub-passes that follow it
-        sit at the same level, so their events keep level 3. The sub-steps are illustrations
-        when the last entry does not match the real pass's snapshot: the copy shows something
-        else than the pass did.
+        An iteration group carries its iteration's end snapshot, which is its last child's: the
+        group points at that child's snapshot file instead of writing a second, identical copy.
+        The sub-passes that follow it sit at the same level, so their events keep level 3. The
+        sub-steps are illustrations when the last entry does not match the real pass's snapshot:
+        the copy shows something else than the pass did.
         """
         pass_name = command.split(maxsplit=1)[0]
         try:
@@ -505,6 +506,7 @@ class _Recording:
         if not entries:
             return None
         group: Step | None = None
+        groups: list[tuple[Step, dict[str, Any]]] = []
         chain = before_snapshot
         created: list[Step] = []
         for title, snapshot, log in entries:
@@ -528,6 +530,7 @@ class _Recording:
                     code=self._pass_refs(pass_name),
                 )
                 group = step
+                groups.append((step, snapshot))
             else:
                 step = _new_step(
                     self.steps,
@@ -538,13 +541,23 @@ class _Recording:
                     code=self._pass_refs(sub_name),
                 )
             step.log = list(log)
+            step.diff = diff(chain, snapshot)
+            if grouping:
+                created.append(step)
+                continue
             step.snapshot = f"{step.id}.json"
             self.snapshots[step.snapshot] = snapshot
-            step.diff = diff(chain, snapshot)
-            if not grouping:
-                chain = snapshot
-                self._events(step, sub_name, log)
+            chain = snapshot
+            self._events(step, sub_name, log)
+            if group is not None:
+                # The group's end state is its last child's: share the file, write no copy.
+                group.snapshot = step.snapshot
             created.append(step)
+        for step, snapshot in groups:
+            if step.snapshot is None or self.snapshots[step.snapshot] != snapshot:
+                # A group with no child (or whose last child ends elsewhere) keeps its own file.
+                step.snapshot = f"{step.id}.json"
+                self.snapshots[step.snapshot] = snapshot
         if not matches(entries[-1][1], real_snapshot):
             for step in created:
                 step.illustration = True

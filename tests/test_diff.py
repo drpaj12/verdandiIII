@@ -132,10 +132,29 @@ class DiffTest(unittest.TestCase):
             )
         )
         result = diff(before, after, by_name=True)
-        self.assertEqual(result.added, [])
-        self.assertEqual(result.removed, [])
-        self.assertEqual(result.changed, [])
-        self.assertTrue(result.by_name)
+        self.assertEqual(
+            result,
+            Diff(added=[], removed=[], changed=[], by_name=True),
+        )
+
+    def test_by_name_change_across_compact(self) -> None:
+        before = ir(module("top", nodes=[node(1, "a")], nets=[net(2, "n", drivers=[1])]))
+        after = ir(
+            module(
+                "top",
+                nodes=[node(10, "a", params={"WIDTH": "4"})],
+                nets=[net(11, "n", drivers=[10])],
+            )
+        )
+        self.assertEqual(
+            diff(before, after, by_name=True),
+            Diff(
+                added=[],
+                removed=[],
+                changed=[ObjRef("top", "node", 10, "a")],
+                by_name=True,
+            ),
+        )
 
     def test_empty_diff(self) -> None:
         snapshot = ir(

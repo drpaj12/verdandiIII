@@ -132,6 +132,12 @@ class Locator:
 
     def __init__(self, root: Path | None) -> None:
         self._root = root.resolve() if root is not None else None
+        self._function_names: set[str] | None = None
+
+    @property
+    def root(self) -> Path | None:
+        """The source tree the locator reads, or None when it has none."""
+        return self._root
 
     def pass_files(self, name: str) -> list[Path]:
         """The pass's C files, relative to the root; empty when it registers nowhere."""
@@ -169,6 +175,33 @@ class Locator:
             )
             index = end + 1
         return refs
+
+    def has_function(self, name: str) -> bool:
+        """True when a C function definition named ``name`` is under the pass roots.
+
+        A note may hang on a source function (spec 3), and that anchor names no pass, so every
+        ``.c`` file of the pass and front-end roots is scanned. The names are gathered once per
+        locator.
+        """
+        if self._root is None:
+            return False
+        if self._function_names is None:
+            self._function_names = self._scan_function_names()
+        return name in self._function_names
+
+    def _scan_function_names(self) -> set[str]:
+        """Every function name of every ``.c`` file under the pass roots."""
+        assert self._root is not None
+        names: set[str] = set()
+        for source_root in _SOURCE_ROOTS:
+            directory = self._root / source_root
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.rglob("*.c")):
+                for ref in self.functions(self._relative(path)):
+                    if ref.function is not None:
+                        names.add(ref.function)
+        return names
 
     def find_text(self, files: list[Path], text: str) -> list[CodeRef]:
         """Every line of ``files`` containing ``text``, with its enclosing function's name."""

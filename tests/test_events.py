@@ -10,10 +10,19 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import verdandi.odin3.events as events_module
 from tests.helpers import HAVE_ODIN3
 from tests.micros import AND_ZERO
 from tests.test_record import techlib, write_micro
 from verdandi.odin3.events import events
+
+
+class ExcludedFormatsTest(unittest.TestCase):
+    def test_object_naming_formats_left_out_are_documented(self) -> None:
+        source = Path(events_module.__file__).read_text(encoding="utf-8")
+        # Two DEBUG formats that name an object still get no pattern; the list says why.
+        self.assertIn("exchange.c:66", source)
+        self.assertIn("write_formats.c:235", source)
 
 
 class EventsTest(unittest.TestCase):

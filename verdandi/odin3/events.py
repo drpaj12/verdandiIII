@@ -238,6 +238,16 @@ _ROWS: dict[str, list[_Row]] = {
 # hardmap is partial_map's alias: it logs under the partial_map prefix and reuses its rows.
 _ROWS["hardmap"] = _ROWS["partial_map"]
 
+# Object-naming DEBUG formats left without a pattern, and why (plan Task 8; the agent defaults
+# carry the same list):
+# - src/passes/abc/exchange.c:66 ("abc| %s"): ABC's own verbose output, already held per ABC
+#   sub-step; a pattern would flood the abc L1 log with one event per line.
+# - src/passes/write_formats.c:235 ("%s: %s: top %s"): a writer's progress line; it names the
+#   top module but reports no design change, and every write pass would log it.
+# The fsm lines that name no object ("found reset state", "transition ignored",
+# "found %s cell for state register") and partial_map's architecture carry-pattern line (input
+# data, not an object) are left out for the same reason.
+
 # The pass-name key -> its patterns, in the order a line is tried (plan Task 8 PATTERNS).
 PATTERNS: dict[str, list[re.Pattern[str]]] = {
     name: [pattern for pattern, _prefix, _rule in rows] for name, rows in _ROWS.items()

@@ -116,16 +116,25 @@ class DiffTest(unittest.TestCase):
 
     def test_diff_across_compact(self) -> None:
         before = ir(
-            module("top", nodes=[node(1, "a")], nets=[net(2, "n", drivers=[1])],
-                   wires=[wire(3, "w")])
+            module(
+                "top",
+                nodes=[node(1, "a", pins=[{"port": "Y", "bit": 0, "net": 2}])],
+                nets=[net(2, "n", drivers=[1])],
+                wires=[wire(3, "w")],
+            )
         )
         after = ir(
-            module("top", nodes=[node(10, "a")], nets=[net(11, "n", drivers=[10])],
-                   wires=[wire(12, "w")])
+            module(
+                "top",
+                nodes=[node(10, "a", pins=[{"port": "Y", "bit": 0, "net": 11}])],
+                nets=[net(11, "n", drivers=[10])],
+                wires=[wire(12, "w")],
+            )
         )
         result = diff(before, after, by_name=True)
         self.assertEqual(result.added, [])
         self.assertEqual(result.removed, [])
+        self.assertEqual(result.changed, [])
         self.assertTrue(result.by_name)
 
     def test_empty_diff(self) -> None:

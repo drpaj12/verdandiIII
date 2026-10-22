@@ -128,8 +128,10 @@ print_stats`). Verdandi opens that step without changing Odin III:
      equivalent structures for the mapper to pick from;
    - `if -K K` (the K-LUT technology mapping): every AIG node gets its K-feasible cuts, the mapper
      picks a cover of the AIG by cuts, each chosen cut becomes one K-input LUT whose truth table is
-     the cut's function; shown as the AIG before and the LUT network after, with the example's LUT
-     count and depth from `print_stats`;
+     the cut's function; shown as the AIG before and the LUT network after, with the example's
+     depth (`lev`) from `print_stats` and its LUT count from the mapped network (or the pass log's
+     `-> N LUTs`; counter2: 2 LUTs, depth 1, while its `nd` of 4 also counts the two output
+     buffers);
    - `mfs2`: each LUT is simplified using don't-cares from its window (resubstitution).
    The notes for these steps explain the transformation in words and point at the example's numbers
    (nodes, levels, LUTs before and after).

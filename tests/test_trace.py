@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -304,6 +305,21 @@ class TraceVersionTest(unittest.TestCase):
             with self.assertRaises(ValueError) as caught:
                 load(directory)
             self.assertIn("newer", str(caught.exception))
+
+
+class TracePathTest(unittest.TestCase):
+    def test_relative_directory_survives_chdir(self) -> None:
+        previous = os.getcwd()
+        with tempfile.TemporaryDirectory() as work:
+            try:
+                os.chdir(work)
+                save(Path("trace"), make_manifest(), make_steps(), make_snapshots(), [])
+                trace = load(Path("trace"))
+                os.chdir(previous)
+                self.assertEqual(trace.snapshot(trace.step("s0001")),
+                                 {"kind": "ir", "modules": []})
+            finally:
+                os.chdir(previous)
 
 
 if __name__ == "__main__":

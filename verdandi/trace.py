@@ -87,7 +87,8 @@ class Trace:
     """A loaded trace: manifest, steps and lazily read snapshots."""
 
     def __init__(self, directory: Path, manifest: Manifest, steps: list[Step]) -> None:
-        self.directory = Path(directory)
+        # Resolved once: snapshots are read lazily, and a later chdir must not move them.
+        self.directory = Path(directory).resolve()
         self.manifest = manifest
         self.steps = list(steps)
         self._by_id: dict[str, Step] = {}
@@ -133,7 +134,7 @@ def save(
     An existing trace directory is replaced as a whole: files from an earlier save
     that are not part of this trace do not survive.
     """
-    directory = Path(directory)
+    directory = Path(directory).resolve()
     _check_unique([_checked_name(name, "snapshot") for name in snapshots], "snapshot")
     _check_unique([_checked_name(name, "picture") for name in pictures or {}], "picture")
     _check_unique([source.name for source in sources], "source")
@@ -192,7 +193,7 @@ def _swap_into_place(staging: Path, target: Path) -> None:
 
 def load(directory: Path) -> Trace:
     """Read a trace directory; refuse a format version newer than this player."""
-    directory = Path(directory)
+    directory = Path(directory).resolve()
     manifest_data = _read_json_object(directory / "manifest.json")
     version = _parse_version(manifest_data.get("version"))
     if version > FORMAT_VERSION:

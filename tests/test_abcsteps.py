@@ -15,7 +15,7 @@ from unittest import mock
 from tests.helpers import HAVE_ABC, HAVE_ODIN3, ODIN3_ROOT, abc_binary
 from tests.micros import COUNTER2
 from tests.test_record import techlib, write_micro
-from verdandi.odin3.abcsteps import abc_script, run_abc_steps
+from verdandi.odin3.abcsteps import TITLES, abc_script, run_abc_steps
 from verdandi.odin3.record import record
 from verdandi.trace import Trace, load
 
@@ -79,15 +79,30 @@ class RecordedStepsTest(unittest.TestCase):
         self.assertEqual(code, 0)
         return out, load(out)
 
-    def test_record_counter_abc_steps_not_illustrations(self) -> None:
+    def test_record_counter_abc_children(self) -> None:
         # Both sides mapped two LUTs: ABC's network node count (nd) is 4 on either side (2 LUTs
         # and 2 output-buffer nodes), so the replay illustrates the linked run, not differs.
         with tempfile.TemporaryDirectory() as tmp:
-            _out, trace = self.record_counter2(tmp)
+            out, trace = self.record_counter2(tmp)
             abc_step = next(step for step in trace.steps if step.anchor == "pass:abc")
             children = trace.children(abc_step.id)
             self.assertEqual(len(children), 7)
+            assert ODIN3_ROOT is not None
+            words = [command.split()[0] for command in abc_script(ODIN3_ROOT, 6)]
+            self.assertEqual(
+                [child.anchor for child in children], [f"abc:{word}" for word in words]
+            )
+            self.assertEqual([child.title for child in children], [TITLES[word] for word in words])
             for child in children:
+                self.assertEqual(child.level, 2, child.title)
+                self.assertEqual(child.parent, abc_step.id, child.title)
+                self.assertIsNone(child.snapshot, child.title)
+                self.assertIsNotNone(child.picture, child.title)
+                picture = out / "pic" / str(child.picture)
+                self.assertTrue(picture.is_file(), child.title)
+                self.assertTrue(
+                    picture.read_text(encoding="utf-8").startswith("digraph"), child.title
+                )
                 self.assertFalse(child.illustration, child.title)
 
 

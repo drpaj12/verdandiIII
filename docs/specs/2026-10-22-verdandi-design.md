@@ -97,6 +97,12 @@ limit (default 5000 nodes) with a clear message.
 
 For a pass name, the registering file is found by its `odin3_pass_def` usage string in
 `src/passes/**` (and `src/frontends/**` for readers); the pass's files are that file's directory.
+The name literal and the usage string normally sit on adjacent lines. A macro-registered family
+(Odin III's `OPT_DEF` in `src/passes/opt/register.c`: the names in `k_pass_names`, the usage strings
+~468 lines below) is found by a second clause, tried only when the first finds nothing: the file
+contains the token `odin3_pass_def`, a literal equal to `"<name>"` and a usage literal anywhere in
+the file. Requiring the token keeps a stray pass-name literal in an unrelated file (a reader's
+format table) from winning.
 Functions are found by a C function-definition scan of those files (name, start and end line). For
 an L3 event, the rule name in the log line is searched in the pass's files to give the line that logs
 it. Everything is read from `ODIN3_ROOT` at record time, so it follows the current source. No
@@ -122,14 +128,16 @@ print_stats`). Verdandi opens that step without changing Odin III:
      equivalent structures for the mapper to pick from;
    - `if -K K` (the K-LUT technology mapping): every AIG node gets its K-feasible cuts, the mapper
      picks a cover of the AIG by cuts, each chosen cut becomes one K-input LUT whose truth table is
-     the cut's function; shown as the AIG before and the LUT network after, with the example's LUT
-     count and depth from `print_stats`;
+     the cut's function; shown as the AIG before and the LUT network after, with the example's
+     depth (`lev`) from `print_stats` and its LUT count from the mapped network (or the pass log's
+     `-> N LUTs`; counter2: 2 LUTs, depth 1, while its `nd` of 4 also counts the two output
+     buffers);
    - `mfs2`: each LUT is simplified using don't-cares from its window (resubstitution).
    The notes for these steps explain the transformation in words and point at the example's numbers
    (nodes, levels, LUTs before and after).
 4. The real `abc` pass then runs on the real design (L1), and its result is the next snapshot. When
-   the standalone result differs from the linked one (LUT count), the L2 ABC steps are marked
-   "illustration".
+   the standalone result differs from the linked one (its network node count `nd` from
+   `print_stats`, compared with the linked run's), the L2 ABC steps are marked "illustration".
 
 ## 7. Player (Wyrd III style)
 

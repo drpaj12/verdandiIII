@@ -50,7 +50,11 @@ class CodeRef:
 
 @dataclass
 class Step:
-    """One node of the playthrough tree, level 0 (stage) to 3 (event)."""
+    """One node of the playthrough tree, level 0 (stage) to 3 (event).
+
+    ``level`` is a label, not a depth: an L3 event may sit directly under its L1 pass, and an
+    iteration group and its children are both L2. Walk ``parent`` and children instead.
+    """
 
     id: str
     parent: str | None

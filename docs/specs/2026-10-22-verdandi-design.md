@@ -134,8 +134,8 @@ print_stats`). Verdandi opens that step without changing Odin III:
    The notes for these steps explain the transformation in words and point at the example's numbers
    (nodes, levels, LUTs before and after).
 4. The real `abc` pass then runs on the real design (L1), and its result is the next snapshot. When
-   the standalone result differs from the linked one (LUT count), the L2 ABC steps are marked
-   "illustration".
+   the standalone result differs from the linked one (its network node count `nd` from
+   `print_stats`, compared with the linked run's), the L2 ABC steps are marked "illustration".
 
 ## 7. Player (Wyrd III style)
 

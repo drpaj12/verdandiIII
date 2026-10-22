@@ -111,6 +111,22 @@ def make_snapshots() -> dict[str, dict[str, Any]]:
     }
 
 
+def trace_bytes(root: Path) -> dict[str, bytes]:
+    """Every file of a trace, with the manifest's record time masked (spec 5)."""
+    files: dict[str, bytes] = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = str(path.relative_to(root))
+        data = path.read_bytes()
+        if relative == "manifest.json":
+            manifest = json.loads(data)
+            manifest["recorded"] = ""
+            data = json.dumps(manifest, sort_keys=True, indent=1).encode()
+        files[relative] = data
+    return files
+
+
 class TraceFileTest(unittest.TestCase):
     def test_round_trip(self) -> None:
         manifest = make_manifest()
@@ -177,6 +193,38 @@ class TraceFileTest(unittest.TestCase):
                  [], pictures={"s0004.dot": picture})
             copied = Path(directory) / "pic" / "s0004.dot"
             self.assertEqual(copied.read_bytes(), data)
+
+
+    def test_whole_trace_is_deterministic(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            work_path = Path(work)
+            source = work_path / "counter.v"
+            source.write_bytes(b"module counter;\r\nendmodule\r\n")
+            picture = work_path / "strash.dot"
+            picture.write_bytes(b"digraph G {\n}\n")
+            first = work_path / "first"
+            second = work_path / "second"
+            for directory in (first, second):
+                save(directory, make_manifest(), make_steps(), make_snapshots(), [source],
+                     pictures={"s0004.dot": picture})
+            first_files = trace_bytes(first)
+            self.assertEqual(first_files, trace_bytes(second))
+            self.assertEqual(sorted(first_files), ["manifest.json", "pic/s0004.dot",
+                                                   "snap/s0001.json", "snap/s0002.json",
+                                                   "snap/s0003.json", "src/counter.v",
+                                                   "steps.json"])
+            changed = make_manifest()
+            changed.program_version = "9.9.9"
+            manifest_differs = work_path / "manifest-differs"
+            save(manifest_differs, changed, make_steps(), make_snapshots(), [source],
+                 pictures={"s0004.dot": picture})
+            self.assertNotEqual(first_files, trace_bytes(manifest_differs))
+            other_picture = work_path / "other.dot"
+            other_picture.write_bytes(b"digraph H {\n}\n")
+            picture_differs = work_path / "picture-differs"
+            save(picture_differs, make_manifest(), make_steps(), make_snapshots(), [source],
+                 pictures={"s0004.dot": other_picture})
+            self.assertNotEqual(first_files, trace_bytes(picture_differs))
 
 
 class TraceSafetyTest(unittest.TestCase):

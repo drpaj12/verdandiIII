@@ -14,13 +14,15 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import verdandi.odin3.record as record_module
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, Micro
+from verdandi.diff import diff
 from verdandi.odin3.record import _check_top, default_script, record
-from verdandi.trace import load
+from verdandi.trace import Diff, load
 
 STAGES_FILE = Path(__file__).resolve().parent.parent / "verdandi" / "odin3" / "stages.json"
 
@@ -282,6 +284,38 @@ class RecorderTest(unittest.TestCase):
             self.assertIn("not a Verilog identifier", stderr.getvalue())
             self.assertFalse(out.exists())
             self.assertFalse((base.parent / "escape.blif").exists())
+
+    def test_record_every_step_carries_a_diff(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            out = Path(tmp) / "trace"
+            code = record([source], top, out, techlib=library, odin3_root=ODIN3_ROOT)
+            self.assertEqual(code, 0)
+            trace = load(out)
+            for step in trace.steps:
+                self.assertIsNotNone(step.diff, f"{step.title}: no diff")
+            # An L0 stage diffs its own end snapshot against the step before it: the previous
+            # stage's final IR snapshot (None before the first stage).
+            previous: dict[str, Any] | None = None
+            for root in trace.children(None):
+                snapshot = trace.snapshot(root)
+                self.assertIsNotNone(snapshot, f"{root.title}: no snapshot")
+                assert snapshot is not None and root.diff is not None
+                self.assertEqual(root.diff, diff(previous, snapshot, by_name=root.diff.by_name))
+                if root.title.startswith("ABC"):
+                    self.assertTrue(root.diff.by_name, "the ABC stage compacts the IDs")
+                previous = snapshot
+            read_verilog = next(
+                step for step in trace.steps if step.anchor == "pass:read_verilog"
+            )
+            children = trace.children(read_verilog.id)
+            self.assertEqual([child.title for child in children], ["Parse", "Elaborate"])
+            for child in children:
+                self.assertEqual(
+                    child.diff, Diff(added=[], removed=[], changed=[], by_name=False)
+                )
 
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()

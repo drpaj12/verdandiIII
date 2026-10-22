@@ -3,7 +3,10 @@
 The script is split on ``;``. Each command runs as one L1 pass step under an L0 stage step from
 ``stages.json`` (a pass the map does not list gets a stage titled by its name); the IR is
 snapshotted after it and diffed against the previous IR snapshot. ``read_verilog`` also gives
-two L2 children from the kept ASTs: "Parse" (PARSED) and "Elaborate" (ELABORATED). A failing
+two L2 children from the kept ASTs: "Parse" (PARSED) and "Elaborate" (ELABORATED). Every
+step carries a diff: an L1 IR step against the previous IR snapshot (by name across a
+renumbering pass), an L0 stage against the previous stage's final IR snapshot, and an L2 AST
+step the empty diff. A failing
 pass marks its step failed, writes the trace up to it and returns 1; a snapshot over
 ``max_nodes`` refuses the recording and returns 2, naming the step.
 """
@@ -255,6 +258,8 @@ class _Recording:
         self.snapshots: dict[str, dict[str, Any]] = {}
         self.previous: dict[str, Any] | None = None
         self.stage: Step | None = None
+        self.stage_before: dict[str, Any] | None = None
+        self.stage_by_name = False
 
     def run(self, commands: list[str]) -> int:
         """Record every command; 0 ok, 1 a pass failed, 2 a snapshot is over the size guard."""
@@ -279,6 +284,10 @@ class _Recording:
         arguments = parts[1].strip() if len(parts) > 1 else ""
         stage_title = self.titles.get(name, name)
         if self.stage is None or self.stage.title != stage_title:
+            # The stage step diffs from the step before it, which is the previous stage's
+            # final IR snapshot (None before the first stage).
+            self.stage_before = self.previous
+            self.stage_by_name = False
             self.stage = _new_step(
                 self.steps, parent=None, level=0, title=stage_title, anchor=f"stage:{stage_title}"
             )
@@ -314,9 +323,12 @@ class _Recording:
             return 2
         step.snapshot = f"{step.id}.json"
         self.snapshots[step.snapshot] = snapshot
-        step.diff = diff(self.previous, snapshot, by_name=_renumbers(name, command))
+        by_name = _renumbers(name, command)
+        step.diff = diff(self.previous, snapshot, by_name=by_name)
         self.previous = snapshot
         self.stage.snapshot = step.snapshot
+        self.stage_by_name = self.stage_by_name or by_name
+        self.stage.diff = diff(self.stage_before, snapshot, by_name=self.stage_by_name)
         if name == "read_verilog":
             return self._ast_children(step, design, refs)
         return None
@@ -341,6 +353,8 @@ class _Recording:
             )
             child.snapshot = f"{child.id}.json"
             self.snapshots[child.snapshot] = snapshot
+            # An AST step still carries a diff: Task 4's diff of an AST snapshot is empty.
+            child.diff = diff(self.previous, snapshot)
         return None
 
     def _write(self) -> None:

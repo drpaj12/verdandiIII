@@ -32,6 +32,15 @@ _TOP_OPTION = re.compile(r"(?:^|\s)--?top(?:\s|=|$)")
 # Characters a module name or a script path cannot hold: they would split or break the script.
 _SCRIPT_UNSAFE = set(';"\n')
 
+# A plain Verilog identifier: the top is also a file name (<top>.blif) and an option argument.
+_TOP_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*")
+
+
+def _check_top(top: str) -> None:
+    """Refuse a top that is not one Verilog identifier: it would name a path or an option."""
+    if _TOP_NAME.fullmatch(top) is None:
+        raise ValueError(f"top module name {top!r} is not a Verilog identifier")
+
 
 def stage_map() -> tuple[int, dict[str, str]]:
     """The stage map's version and its pass name -> stage title mapping.
@@ -124,8 +133,7 @@ def default_script(
     """
     if (arch is None) == (techlib is None):
         raise ValueError("give exactly one of --arch and --techlib")
-    if _SCRIPT_UNSAFE & set(top) or " " in top:
-        raise ValueError(f"top module name {top!r} is not a Verilog identifier")
+    _check_top(top)
     read_files = " ".join(_quote(path) for path in files)
     commands: list[str] = []
     if arch is not None:
@@ -387,6 +395,11 @@ def record(
     )
     if missing:
         print(f"verdandi record: no such file: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    try:
+        _check_top(top)
+    except ValueError as exc:
+        print(f"verdandi record: {exc}", file=sys.stderr)
         return 2
     root = odin3_root if odin3_root is not None else _env_root()
     locator = Locator(root)

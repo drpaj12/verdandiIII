@@ -19,7 +19,7 @@ from unittest import mock
 import verdandi.odin3.record as record_module
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, Micro
-from verdandi.odin3.record import record
+from verdandi.odin3.record import _check_top, default_script, record
 from verdandi.trace import load
 
 STAGES_FILE = Path(__file__).resolve().parent.parent / "verdandi" / "odin3" / "stages.json"
@@ -47,6 +47,28 @@ def stage_map() -> dict[str, str]:
     return {
         name: str(stage["title"]) for stage in data["stages"] for name in stage["passes"]
     }
+
+
+class TopNameTest(unittest.TestCase):
+    def test_top_rejects_non_identifiers(self) -> None:
+        # A top names a path (<top>.blif) and a hierarchy option: only an identifier passes.
+        for top in ("../escape", "a/b", "a\\b", "-top", "a b", 'a"b', "a;b", "..", ""):
+            with self.subTest(top=top), self.assertRaises(ValueError):
+                _check_top(top)
+
+    def test_top_accepts_identifiers(self) -> None:
+        for top in ("counter2", "_count2", "a$b", "A1"):
+            with self.subTest(top=top):
+                _check_top(top)
+                script = default_script(
+                    [Path("counter2.v")],
+                    top,
+                    arch=None,
+                    techlib=Path("lpm.o3lib"),
+                    k=6,
+                    blif_out=Path("out.blif"),
+                )
+                self.assertIn('read_techlib "lpm.o3lib"', script)
 
 
 @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
@@ -245,6 +267,21 @@ class RecorderTest(unittest.TestCase):
                         )
                     self.assertEqual(code, 2, stderr.getvalue())
                     self.assertTrue(stderr.getvalue().startswith("verdandi record: "))
+
+    def test_record_rejects_unsafe_top(self) -> None:
+        library = self.require_techlib()
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "work"
+            base.mkdir()
+            source = write_micro(COUNTER2, base)
+            out = base / "trace"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = record([source], "../escape", out, techlib=library)
+            self.assertEqual(code, 2)
+            self.assertIn("not a Verilog identifier", stderr.getvalue())
+            self.assertFalse(out.exists())
+            self.assertFalse((base.parent / "escape.blif").exists())
 
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()

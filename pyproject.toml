@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verdandi"
+version = "0.1.0"
+description = "Verdandi III: the Micro through the Macro, a record-and-replay walk (part of Yggdrasil III)"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = ["odin3"]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6"]
+
+[project.scripts]
+verdandi = "verdandi.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["verdandi*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+
+[[tool.mypy.overrides]]
+# The odin3 binding ships no py.typed marker; follow its source instead of treating it as Any.
+module = ["odin3", "odin3.*"]
+follow_untyped_imports = true

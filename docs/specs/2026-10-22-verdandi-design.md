@@ -85,7 +85,8 @@ A directory:
   steps are ordinary child steps (`parent` set, `level` 2 or 3).
 - `snap/<id>.json`: IR snapshot: modules, each with nodes (`id`, `name`, `type`, `params`, `pins`
   as `{port, bit, net}`, `sources`), nets (`id`, `name`, `drivers`, `sinks`, `sources`), wires; or an
-  AST snapshot (`kind`, `sub`, `name`, `loc`, `children`). Deterministic order (by ID).
+  AST snapshot (`kind`, `sub`, `name`, `loc`, `children`). Deterministic order (by ID). `params` omits
+  PROC-kind values: a `$proc`'s RTLIL body text is unbounded and outside the node-count size guard.
 - `src/`: copies of the micro's Verilog (the player shows them; the user's file may change later).
 
 Diffs match objects by ID within one design; across a `compact` (IDs renumbered) they match by name

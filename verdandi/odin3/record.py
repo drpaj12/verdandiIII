@@ -34,12 +34,36 @@ _SCRIPT_UNSAFE = set(';"\n')
 
 
 def stage_map() -> tuple[int, dict[str, str]]:
-    """The stage map's version and its pass name -> stage title mapping."""
-    data = json.loads(_STAGES_FILE.read_text(encoding="utf-8"))
-    titles = {
-        str(name): str(stage["title"]) for stage in data["stages"] for name in stage["passes"]
-    }
-    return int(data["version"]), titles
+    """The stage map's version and its pass name -> stage title mapping.
+
+    A missing (OSError) or malformed (ValueError) map raises; the recorder turns either into
+    a clean message and exit 2.
+    """
+    try:
+        data = json.loads(_STAGES_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{_STAGES_FILE.name}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{_STAGES_FILE.name} is not a JSON object")
+    version = data.get("version")
+    stages = data.get("stages")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise ValueError(f"{_STAGES_FILE.name}: malformed version {version!r}")
+    if not isinstance(stages, list):
+        raise ValueError(f"{_STAGES_FILE.name}: no list of stages")
+    titles: dict[str, str] = {}
+    for stage in stages:
+        if not isinstance(stage, dict):
+            raise ValueError(f"{_STAGES_FILE.name}: a stage is not a JSON object")
+        title = stage.get("title")
+        passes = stage.get("passes")
+        if not isinstance(title, str) or not isinstance(passes, list):
+            raise ValueError(f"{_STAGES_FILE.name}: a stage needs a title and a pass list")
+        for name in passes:
+            if not isinstance(name, str):
+                raise ValueError(f"{_STAGES_FILE.name}: pass name {name!r} is not a string")
+            titles[name] = title
+    return version, titles
 
 
 def _quote(path: Path) -> str:
@@ -373,7 +397,11 @@ def record(
             "git checkout); recording without code locations",
             file=sys.stderr,
         )
-    version, titles = stage_map()
+    try:
+        version, titles = stage_map()
+    except (OSError, ValueError) as exc:
+        print(f"verdandi record: {exc}", file=sys.stderr)
+        return 2
     with tempfile.TemporaryDirectory(prefix="verdandi-record-") as scratch:
         if script is None:
             try:
@@ -406,4 +434,8 @@ def record(
             library=library,
             max_nodes=max_nodes,
         )
-        return recording.run(commands)
+        try:
+            return recording.run(commands)
+        except (OSError, ValueError) as exc:
+            print(f"verdandi record: {exc}", file=sys.stderr)
+            return 2

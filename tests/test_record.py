@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import verdandi.odin3.record as record_module
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, Micro
 from verdandi.odin3.record import record
@@ -196,6 +197,54 @@ class RecorderTest(unittest.TestCase):
             trace = load(out)
             self.assertEqual(trace.manifest.source_commit, "unknown")
             self.assertFalse(any(step.code for step in trace.steps), "code refs without a tree")
+
+    def test_record_save_errors_are_usage_errors(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        script = f'read_techlib "{library}"'
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = write_micro(COUNTER2, base)
+            other = base / "a" / "counter2.v"
+            other.parent.mkdir()
+            other.write_text("module other; endmodule\n", encoding="utf-8")
+            (base / "occupied").write_text("x", encoding="utf-8")
+            (base / "file").write_text("x", encoding="utf-8")
+            cases: dict[str, tuple[list[Path], Path]] = {
+                "occupied out": ([source], base / "occupied"),
+                "unwritable out": ([source], base / "file" / "trace"),
+                "duplicate source basenames": ([source, other], base / "trace"),
+            }
+            for name, (files, out) in cases.items():
+                with self.subTest(name=name):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr):
+                        code = record(files, top, out, techlib=library, script=script)
+                    self.assertEqual(code, 2, stderr.getvalue())
+                    self.assertTrue(stderr.getvalue().startswith("verdandi record: "))
+
+    def test_record_stage_map_errors_are_usage_errors(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        script = f'read_techlib "{library}"'
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            source = write_micro(COUNTER2, base)
+            corrupt = base / "corrupt.json"
+            corrupt.write_text("{", encoding="utf-8")
+            cases = {"missing": base / "missing.json", "corrupt": corrupt}
+            for name, path in cases.items():
+                with self.subTest(name=name):
+                    stderr = io.StringIO()
+                    with (
+                        mock.patch.object(record_module, "_STAGES_FILE", path),
+                        contextlib.redirect_stderr(stderr),
+                    ):
+                        code = record(
+                            [source], top, base / "trace", techlib=library, script=script
+                        )
+                    self.assertEqual(code, 2, stderr.getvalue())
+                    self.assertTrue(stderr.getvalue().startswith("verdandi record: "))
 
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()

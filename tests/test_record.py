@@ -327,6 +327,29 @@ class RecorderTest(unittest.TestCase):
                     child.diff, Diff(added=[], removed=[], changed=[], by_name=False)
                 )
 
+    def test_event_code_refs_are_debug_log_lines(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            assert ODIN3_ROOT is not None
+            out = Path(tmp) / "trace"
+            code = record([source], top, out, techlib=library, odin3_root=ODIN3_ROOT)
+            self.assertEqual(code, 0)
+            trace = load(out)
+            events = [step for step in trace.steps if step.level == 3]
+            self.assertTrue(events, "no event steps")
+            for event in events:
+                self.assertTrue(event.code, event.title)
+                for ref in event.code:
+                    line = (ODIN3_ROOT / ref.file).read_text(encoding="utf-8").splitlines()[
+                        ref.line - 1
+                    ]
+                    # An event's ref is the DEBUG log call that formats it: no comment, no
+                    # INFO line, and no unrelated call that shares the prefix.
+                    self.assertIn("odin3_log", line, (ref.file, ref.line))
+                    self.assertIn("ODIN3_LOG_DEBUG", line, (ref.file, ref.line))
+
     def test_write_blif_log_keeps_info_only(self) -> None:
         library = self.require_techlib()
         top, _text = COUNTER2

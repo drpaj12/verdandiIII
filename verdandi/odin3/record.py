@@ -437,9 +437,10 @@ class _Recording:
     def _events(self, parent: Step, pass_name: str, log: list[str]) -> None:
         """The log's object-naming DEBUG lines as L3 children of the pass's step (spec 4).
 
-        An event's code refs are the lines of the pass's files holding the format text before
-        its first ``%`` (spec 6), searched once per format. An event is a log line, not a
-        design state: it carries the empty diff, as an AST step does.
+        An event's code refs are the DEBUG log calls of the pass's files whose format holds the
+        text before the format's first ``%`` (spec 6), searched once per format: the line that
+        logs the event, not a comment or a call that merely shares the prefix. An event is a
+        log line, not a design state: it carries the empty diff, as an AST step does.
         """
         if pass_name not in PATTERNS:
             return
@@ -452,7 +453,7 @@ class _Recording:
             key = (pass_name, prefix)
             refs = self._ref_cache.get(key)
             if refs is None:
-                refs = self.locator.find_text(files, prefix)
+                refs = self.locator.find_log_text(files, prefix)
                 self._ref_cache[key] = refs
             child = _new_step(
                 self.steps,

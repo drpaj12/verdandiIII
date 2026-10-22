@@ -30,10 +30,101 @@ _LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 # prototype ends in one, so its line is skipped), and a body. The name is group 1.
 _FUNCTION = re.compile(r"^[A-Za-z_][\w \*]*\b(\w+)\s*\([^;]*$")
 
+# The call whose DEBUG format logs an event, and the level token that call must name.
+_LOG_CALL = "odin3_log"
+_DEBUG_LEVEL = "ODIN3_LOG_DEBUG"
+
 
 def _literals(line: str) -> list[str]:
     """The contents of the line's C string literals, in order."""
     return _LITERAL.findall(line)
+
+
+def _skip_literal(text: str, start: int) -> int:
+    """The index after the C string or character literal that starts at ``start``."""
+    quote = text[start]
+    index = start + 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == quote or char == "\n":
+            return index + 1
+        index += 1
+    return index
+
+
+def _skip_comment(text: str, start: int) -> int:
+    """The index after the C comment at ``start``; a line comment ends at its newline."""
+    if text.startswith("/*", start):
+        end = text.find("*/", start + 2)
+        return len(text) if end < 0 else end + 2
+    end = text.find("\n", start + 2)
+    return len(text) if end < 0 else end
+
+
+def _call_end(text: str, open_at: int) -> int:
+    """The index after the ``)`` that closes the call whose ``(`` is at ``open_at``."""
+    depth = 0
+    index = open_at
+    while index < len(text):
+        char = text[index]
+        if char == "/" and text.startswith(("/*", "//"), index):
+            index = _skip_comment(text, index)
+        elif char in "\"'":
+            index = _skip_literal(text, index)
+        else:
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return index + 1
+            index += 1
+    return len(text)
+
+
+def _is_token(text: str, index: int, token: str) -> bool:
+    """True when ``token`` starts at ``index`` as a whole C identifier."""
+    if not text.startswith(token, index):
+        return False
+    before = text[index - 1] if index > 0 else ""
+    after = text[index + len(token)] if index + len(token) < len(text) else ""
+    return not (before.isalnum() or before == "_") and not (after.isalnum() or after == "_")
+
+
+def _debug_call_lines(text: str) -> dict[int, int]:
+    """Line numbers inside an ``odin3_log(ODIN3_LOG_DEBUG, ...)`` call -> the call's first line.
+
+    A call's span is measured with comments and literals skipped, so a format's parentheses do
+    not end it early. A line outside every DEBUG call is absent from the mapping.
+    """
+    lines: dict[int, int] = {}
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "/" and text.startswith(("/*", "//"), index):
+            index = _skip_comment(text, index)
+        elif char in "\"'":
+            index = _skip_literal(text, index)
+        elif _is_token(text, index, _LOG_CALL):
+            open_at = index + len(_LOG_CALL)
+            while open_at < len(text) and text[open_at].isspace():
+                open_at += 1
+            if open_at >= len(text) or text[open_at] != "(":
+                index += len(_LOG_CALL)
+                continue
+            end = _call_end(text, open_at)
+            if text[open_at + 1 : end].lstrip().startswith(_DEBUG_LEVEL):
+                first = text.count("\n", 0, index) + 1
+                last = text.count("\n", 0, end) + 1
+                for number in range(first, last + 1):
+                    lines.setdefault(number, first)
+            index = end
+        else:
+            index += 1
+    return lines
 
 
 class Locator:
@@ -99,6 +190,46 @@ class Locator:
                         file=str(self._relative(path)),
                         line=number,
                         end_line=number,
+                        function=function,
+                    )
+                )
+        return refs
+
+    def find_log_text(self, files: list[Path], text: str) -> list[CodeRef]:
+        """Every DEBUG log call of ``files`` whose format holds ``text``.
+
+        The ref is the call's first line, the line that names ``ODIN3_LOG_DEBUG`` and the
+        format; a comment, an INFO line, or a call whose message merely shares the prefix does
+        not log an event and is left out. A format that spans lines still gives one ref: the
+        line that opens its call.
+        """
+        refs: list[CodeRef] = []
+        for path in files:
+            content = self._text(path)
+            if content is None:
+                continue
+            starts = _debug_call_lines(content)
+            if not starts:
+                continue
+            lines = content.splitlines()
+            spans = self.functions(path)
+            seen: set[int] = set()
+            for number, line in enumerate(lines, start=1):
+                if text not in line or number not in starts:
+                    continue
+                first = starts[number]
+                if first in seen:
+                    continue
+                seen.add(first)
+                function = next(
+                    (span.function for span in spans if span.line <= first <= span.end_line),
+                    None,
+                )
+                refs.append(
+                    CodeRef(
+                        file=str(self._relative(path)),
+                        line=first,
+                        end_line=first,
                         function=function,
                     )
                 )
@@ -204,15 +335,19 @@ class Locator:
                 return None
         return None
 
-    def _lines(self, path: Path) -> list[str] | None:
-        """The file's lines, or None without a root or when the file cannot be read."""
+    def _text(self, path: Path) -> str | None:
+        """The file's text, or None without a root or when the file cannot be read."""
         if self._root is None:
             return None
         try:
-            text = (self._root / path).read_text(encoding="utf-8", errors="replace")
+            return (self._root / path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             return None
-        return text.splitlines()
+
+    def _lines(self, path: Path) -> list[str] | None:
+        """The file's lines, or None without a root or when the file cannot be read."""
+        text = self._text(path)
+        return None if text is None else text.splitlines()
 
     def _relative(self, path: Path) -> Path:
         """``path`` relative to the root (a no-op for paths already below it)."""

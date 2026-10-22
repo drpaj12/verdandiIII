@@ -100,6 +100,16 @@ class OptOrderTest(unittest.TestCase):
         self.assertEqual([name for name in source if name != "opt_share"], expected)
         self.assertEqual(source.index("opt_share"), source.index("opt_merge") + 1)
         self.assertEqual(OPT_LOOP.index("opt_share"), OPT_LOOP.index("opt_merge") + 1)
+        # opt_share is WHEN_FULL in the source, so plain opt never runs it and opt -full does.
+        tokens = {
+            _OPT_SUB_PASS[sub]: when
+            for sub, when in re.findall(
+                r"\{\s*ODIN3_OPT_SUB_([A-Z]+)\s*,\s*(WHEN_[A-Z_]+)\s*\}", body
+            )
+        }
+        self.assertEqual(tokens.get("opt_share"), "WHEN_FULL")
+        self.assertIn("opt_share", opt_loop(True))
+        self.assertNotIn("opt_share", opt_loop(False))
 
 
 class IterationCapCommentTest(unittest.TestCase):

@@ -203,6 +203,7 @@ class _Recording:
         titles: dict[str, str],
         locator: Locator,
         odin3_root: Path | None,
+        source_commit: str,
         library: Any,
         max_nodes: int,
     ) -> None:
@@ -215,6 +216,7 @@ class _Recording:
         self.titles = titles
         self.locator = locator
         self.odin3_root = odin3_root
+        self.source_commit = source_commit
         self.library = library
         self.max_nodes = max_nodes
         self.steps: list[Step] = []
@@ -316,7 +318,7 @@ class _Recording:
             program="odin3",
             program_version=self.library.version(),
             abi=self.library.abi_version(),
-            source_commit=self.locator.commit(),
+            source_commit=self.source_commit,
             files=[str(path) for path in self.files],
             top=self.top,
             arch=None if self.arch is None else str(self.arch),
@@ -344,7 +346,8 @@ def record(
 
     ``script`` replaces the default script. ``abc`` is the standalone ABC binary for the
     opened-up ABC sub-steps (Task 7; not used yet). ``odin3_root`` is where the code locator
-    reads the source (None: the environment's ODIN3_ROOT, else no code locations).
+    reads the source (None: the environment's ODIN3_ROOT, else no code locations); without a
+    git checkout the manifest's source commit is ``"unknown"`` and the run warns once.
     """
     _ = abc
     try:
@@ -362,6 +365,14 @@ def record(
         print(f"verdandi record: no such file: {', '.join(missing)}", file=sys.stderr)
         return 2
     root = odin3_root if odin3_root is not None else _env_root()
+    locator = Locator(root)
+    source_commit = locator.commit()
+    if root is None or source_commit == "unknown":
+        print(
+            "verdandi record: warning: no Odin III source tree (ODIN3_ROOT unset or not a "
+            "git checkout); recording without code locations",
+            file=sys.stderr,
+        )
     version, titles = stage_map()
     with tempfile.TemporaryDirectory(prefix="verdandi-record-") as scratch:
         if script is None:
@@ -391,6 +402,7 @@ def record(
             titles=titles,
             locator=Locator(root),
             odin3_root=root,
+            source_commit=source_commit,
             library=library,
             max_nodes=max_nodes,
         )

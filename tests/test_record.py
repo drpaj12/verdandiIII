@@ -10,9 +10,11 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, Micro
@@ -156,6 +158,44 @@ class RecorderTest(unittest.TestCase):
             self.assertTrue(step.diff.by_name)
             self.assertEqual(step.diff.added, [])
             self.assertEqual(step.diff.removed, [])
+
+    def test_record_without_root_warns_once(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            out = Path(tmp) / "trace"
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ):
+                os.environ.pop("ODIN3_ROOT", None)
+                with contextlib.redirect_stderr(stderr):
+                    code = record([source], top, out, techlib=library, odin3_root=None)
+            self.assertEqual(code, 0)
+            warnings = [line for line in stderr.getvalue().splitlines() if "warning" in line]
+            self.assertEqual(len(warnings), 1, stderr.getvalue())
+            self.assertIn("ODIN3_ROOT", warnings[0])
+            trace = load(out)
+            self.assertEqual(trace.manifest.source_commit, "unknown")
+            self.assertFalse(any(step.code for step in trace.steps), "code refs without a tree")
+
+    def test_record_non_git_root_warns_once(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            root = Path(tmp) / "not-git"
+            root.mkdir()
+            out = Path(tmp) / "trace"
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = record([source], top, out, techlib=library, odin3_root=root)
+            self.assertEqual(code, 0)
+            warnings = [line for line in stderr.getvalue().splitlines() if "warning" in line]
+            self.assertEqual(len(warnings), 1, stderr.getvalue())
+            self.assertIn("ODIN3_ROOT", warnings[0])
+            trace = load(out)
+            self.assertEqual(trace.manifest.source_commit, "unknown")
+            self.assertFalse(any(step.code for step in trace.steps), "code refs without a tree")
 
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()

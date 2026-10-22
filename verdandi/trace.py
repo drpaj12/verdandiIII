@@ -194,7 +194,7 @@ def load(directory: Path) -> Trace:
     """Read a trace directory; refuse a format version newer than this player."""
     directory = Path(directory)
     manifest_data = _read_json_object(directory / "manifest.json")
-    version = int(manifest_data["version"])
+    version = _parse_version(manifest_data.get("version"))
     if version > FORMAT_VERSION:
         raise ValueError(f"trace format {version} is newer than {FORMAT_VERSION}")
     steps_data = json.loads((directory / "steps.json").read_text(encoding="utf-8"))
@@ -233,6 +233,23 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError(f"{path.name} is not a JSON object")
     return loaded
+
+
+def _parse_version(value: Any) -> int:
+    """A format version is a whole number of at least 1; reject anything else."""
+    if isinstance(value, bool):
+        raise ValueError(f"malformed trace format version {value!r}")
+    if isinstance(value, int):
+        version = value
+    elif isinstance(value, float) and value.is_integer():
+        version = int(value)
+    elif isinstance(value, str) and value.strip().removeprefix("-").isdigit():
+        version = int(value.strip())
+    else:
+        raise ValueError(f"malformed trace format version {value!r}")
+    if version < 1:
+        raise ValueError(f"malformed trace format version {value!r}")
+    return version
 
 
 def _optional_str(value: Any) -> str | None:
@@ -286,7 +303,7 @@ def _step_from_dict(data: dict[str, Any]) -> Step:
 
 def _manifest_from_dict(data: dict[str, Any]) -> Manifest:
     return Manifest(
-        version=int(data["version"]),
+        version=_parse_version(data.get("version")),
         program=str(data["program"]),
         program_version=str(data["program_version"]),
         abi=int(data["abi"]),

@@ -273,5 +273,38 @@ class TraceAtomicSaveTest(unittest.TestCase):
             self.assertEqual(leftovers, [])
 
 
+class TraceVersionTest(unittest.TestCase):
+    def _saved_version(self, work: str, value: object) -> Path:
+        directory = Path(work) / "trace"
+        save(directory, make_manifest(), [], {}, [])
+        manifest_path = directory / "manifest.json"
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        data["version"] = value
+        manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        return directory
+
+    def test_malformed_version_is_a_clean_error(self) -> None:
+        values: tuple[object, ...] = ("1.9", 1.9, "one", None, True, [], 0, -1)
+        for value in values:
+            with self.subTest(version=value), tempfile.TemporaryDirectory() as work:
+                directory = self._saved_version(work, value)
+                with self.assertRaises(ValueError) as caught:
+                    load(directory)
+                self.assertIn("malformed trace format version", str(caught.exception))
+
+    def test_integral_version_is_accepted(self) -> None:
+        for value in ("1", 1.0, 1):
+            with self.subTest(version=value), tempfile.TemporaryDirectory() as work:
+                directory = self._saved_version(work, value)
+                self.assertEqual(load(directory).manifest.version, 1)
+
+    def test_newer_version_with_decimal_point_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            directory = self._saved_version(work, 2.0)
+            with self.assertRaises(ValueError) as caught:
+                load(directory)
+            self.assertIn("newer", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

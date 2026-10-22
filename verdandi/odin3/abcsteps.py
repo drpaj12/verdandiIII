@@ -85,23 +85,28 @@ def find_abc(odin3_root: Path | None) -> str | None:
     return None
 
 
-def abc_script(odin3_root: Path | None, k: int) -> list[str]:
-    """The commands of lib/abc/vtr.abc (comments and blank lines dropped, ``{K}`` replaced).
+def abc_script(odin3_root: Path | None, k: int, *, script: Path | None = None) -> list[str]:
+    """The commands of the ABC script: the ``abc --script FILE`` file when given, else
+    ``lib/abc/vtr.abc`` (comments and blank lines dropped, ``{K}`` replaced).
 
-    Without the source file, the spec 6a fallback list. The final ``print_stats`` is dropped:
-    ``run_abc_steps`` adds one after every command.
+    Without the source file, the spec 6a fallback list; a given file is read as it is (its
+    absence raises OSError, which the recorder reports as a missing sub-step). The final
+    ``print_stats`` is dropped: ``run_abc_steps`` adds one after every command.
     """
     commands: list[str] = []
-    if odin3_root is not None:
+    text = ""
+    if script is not None:
+        text = script.read_text(encoding="utf-8")
+    elif odin3_root is not None:
         try:
             text = (odin3_root / "lib" / "abc" / "vtr.abc").read_text(encoding="utf-8")
         except OSError:
             text = ""
-        for line in text.splitlines():
-            command = line.strip()
-            if command and not command.startswith("#"):
-                commands.append(command)
-    if not commands:
+    for line in text.splitlines():
+        command = line.strip()
+        if command and not command.startswith("#"):
+            commands.append(command)
+    if not commands and script is None:
         commands = list(_FALLBACK)
     commands = [command.replace("{K}", str(k)) for command in commands]
     if commands and commands[-1] == "print_stats":

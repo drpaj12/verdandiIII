@@ -48,6 +48,9 @@ _SCRIPT_UNSAFE = set(';"\n')
 # A plain Verilog identifier: the top is also a file name (<top>.blif) and an option argument.
 _TOP_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_$]*")
 
+# The abc pass's "--script FILE" value: a double-quoted path, else one blank-free word.
+_ABC_SCRIPT = re.compile(r'--script\s+(?:"([^"]*)"|(\S+))')
+
 
 def _check_top(top: str) -> None:
     """Refuse a top that is not one Verilog identifier: it would name a path or an option."""
@@ -223,6 +226,15 @@ def _lut_k(arguments: str, default: int) -> int:
     return default
 
 
+def _abc_script_path(arguments: str) -> Path | None:
+    """The ``--script FILE`` path of an ``abc`` command, or None for the built-in script."""
+    found = _ABC_SCRIPT.search(arguments)
+    if found is None:
+        return None
+    value = found.group(1) if found.group(1) is not None else found.group(2)
+    return Path(value)
+
+
 def _no_abc_warning() -> None:
     """The one warning a recording without a standalone ABC binary prints (spec 9)."""
     print(
@@ -389,6 +401,8 @@ class _Recording:
 
         The commands replay on the BLIF the pass exchanges, captured from a copy of the design
         before the real pass runs; each step gets ABC's own picture and log and no snapshot.
+        The commands are the source tree's lib/abc/vtr.abc, or the file the command's own
+        ``--script`` names, read at record time so the replay follows the pass's script.
         The replay follows run 0 only (the first module and clock domain): a multi-domain design's
         later runs are not opened up, as the plan's Task 7 states.
         Each ``abc`` command gets its own directory under the recording's workdir, so a second
@@ -402,6 +416,7 @@ class _Recording:
                 _no_abc_warning()
             return [], {}
         k = _lut_k(arguments, self.k)
+        script = _abc_script_path(arguments)
         self.abc_captures += 1
         workdir = self.workdir / f"abc{self.abc_captures}"
         try:
@@ -409,7 +424,10 @@ class _Recording:
             if not inputs:
                 return [], {}
             abc_steps = run_abc_steps(
-                self.abc, inputs[0], abc_script(self.odin3_root, k), workdir
+                self.abc,
+                inputs[0],
+                abc_script(self.odin3_root, k, script=script),
+                workdir,
             )
         except (OSError, RuntimeError) as exc:
             print(

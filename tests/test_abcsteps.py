@@ -40,6 +40,24 @@ def prepared_design(source: Path) -> odin3.Design:
         design.run_pass(name, arguments)
     return design
 
+
+def odin3_abc_binary() -> str | None:
+    """The abc pass's child engine (odin3-abc) in the Odin III build, when there is one.
+
+    A script other than the embedded default runs in this child (odin3_abc_route), and the
+    binding's process is not the build's executable, so the test names the child explicitly.
+    """
+    if ODIN3_ROOT is None:
+        return None
+    found = sorted(
+        ODIN3_ROOT.glob("build/*/odin3-abc"),
+        key=lambda path: (path.parent.name != "release", str(path)),
+    )
+    for candidate in found:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
 # A small two-level combinational network: enough soft logic for strash and if -K.
 BAND = """\
 .model band
@@ -62,6 +80,13 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual(commands[0], "strash")
         self.assertIn("if -K 6 -v", commands)
         self.assertNotIn("print_stats", commands)
+
+    def test_abc_script_reads_the_given_path(self) -> None:
+        # "abc --script FILE": the replay follows FILE, not lib/abc/vtr.abc.
+        with tempfile.TemporaryDirectory() as tmp:
+            given = Path(tmp) / "custom.abc"
+            given.write_text("# a comment\nstrash\nif -K {K} -v\nprint_stats\n", encoding="utf-8")
+            self.assertEqual(abc_script(None, 4, script=given), ["strash", "if -K 4 -v"])
 
 
 class StepsTest(unittest.TestCase):
@@ -168,6 +193,40 @@ class RecordedStepsTest(unittest.TestCase):
                 )
                 self.assertFalse(child.illustration, child.title)
 
+
+    def test_record_uses_the_given_abc_script(self) -> None:
+        # "abc --script FILE" replays FILE's commands, not lib/abc/vtr.abc.
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        child = odin3_abc_binary()
+        if child is None:
+            self.skipTest("no odin3-abc in the Odin III build")
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            given = Path(tmp) / "custom.abc"
+            given.write_text("strash\nif -K 6\nprint_stats\n", encoding="utf-8")
+            out = Path(tmp) / "trace"
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; fsm; opt; flatten; opt -full; wreduce; lower; "
+                f'abc --lut 6 --script "{given}"'
+            )
+            with mock.patch.dict(os.environ):
+                os.environ["ODIN3_ABC_EXE"] = child
+                code = record(
+                    [source], top, out, techlib=library, script=script, odin3_root=ODIN3_ROOT
+                )
+            self.assertEqual(code, 0)
+            trace = load(out)
+            abc_step = next(step for step in trace.steps if step.anchor == "pass:abc")
+            children = trace.children(abc_step.id)
+            self.assertEqual([child.anchor for child in children], ["abc:strash", "abc:if"])
+            self.assertEqual(
+                [child.title for child in children], [TITLES["strash"], TITLES["if"]]
+            )
 
     def test_record_two_abc_commands(self) -> None:
         # Each abc command captures and replays in its own directory: both L1 steps open up,

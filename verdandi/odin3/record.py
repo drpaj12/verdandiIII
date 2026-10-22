@@ -16,7 +16,9 @@ renumbering pass), an L0 stage against the previous stage's final IR snapshot, a
 and an L2 ABC step the empty diff. A failing pass marks its step failed, writes the trace up
 to it and returns 1; a pass, AST or stage snapshot over ``max_nodes`` refuses the recording
 and returns 2, naming the step, while an over-size sub-step snapshot only warns (a copy's
-intermediate state is not the pass's own result).
+intermediate state is not the pass's own result). ``level`` is a label, not a depth: an L3
+event may sit directly under its L1 pass, and an iteration group and its children are all L2,
+so a reader navigates by ``parent`` and children, never by level arithmetic.
 """
 
 from __future__ import annotations

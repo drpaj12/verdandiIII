@@ -51,6 +51,16 @@ def stage_map() -> dict[str, str]:
     }
 
 
+class LevelIsALabelTest(unittest.TestCase):
+    def test_recorder_and_plan_call_level_a_label(self) -> None:
+        # Task 10 navigates by parent/children: L3 events sit under L1 passes, and an
+        # iteration group and its children share L2, so the docs say level is not a depth.
+        self.assertIn("label, not a depth", record_module.__doc__ or "")
+        plans = Path(__file__).resolve().parent.parent / "docs" / "plans"
+        plan = (plans / "2026-10-22-verdandi-plan.md").read_text(encoding="utf-8")
+        self.assertIn("label, not a depth", plan)
+
+
 class TopNameTest(unittest.TestCase):
     def test_top_rejects_non_identifiers(self) -> None:
         # A top names a path (<top>.blif) and a hierarchy option: only an identifier passes.

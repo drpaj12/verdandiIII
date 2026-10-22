@@ -17,7 +17,7 @@ from tests.micros import COUNTER2
 from tests.test_record import techlib, write_micro
 from verdandi.odin3.abcsteps import abc_script, run_abc_steps
 from verdandi.odin3.record import record
-from verdandi.trace import load
+from verdandi.trace import Trace, load
 
 # A small two-level combinational network: enough soft logic for strash and if -K.
 BAND = """\
@@ -61,6 +61,34 @@ class StepsTest(unittest.TestCase):
                 self.assertTrue(
                     step.dot.read_text(encoding="utf-8").startswith("digraph"), step.command
                 )
+
+
+@unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
+@unittest.skipUnless(HAVE_ABC, "a standalone ABC binary")
+class RecordedStepsTest(unittest.TestCase):
+    """The recorder's ABC sub-steps from the real pass: one per script command (spec 6a)."""
+
+    def record_counter2(self, tmp: str) -> tuple[Path, Trace]:
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        top, _text = COUNTER2
+        source = write_micro(COUNTER2, Path(tmp))
+        out = Path(tmp) / "trace"
+        code = record([source], top, out, techlib=library, odin3_root=ODIN3_ROOT)
+        self.assertEqual(code, 0)
+        return out, load(out)
+
+    def test_record_counter_abc_steps_not_illustrations(self) -> None:
+        # Both sides mapped two LUTs: ABC's network node count (nd) is 4 on either side (2 LUTs
+        # and 2 output-buffer nodes), so the replay illustrates the linked run, not differs.
+        with tempfile.TemporaryDirectory() as tmp:
+            _out, trace = self.record_counter2(tmp)
+            abc_step = next(step for step in trace.steps if step.anchor == "pass:abc")
+            children = trace.children(abc_step.id)
+            self.assertEqual(len(children), 7)
+            for child in children:
+                self.assertFalse(child.illustration, child.title)
 
 
 @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")

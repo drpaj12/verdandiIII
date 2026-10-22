@@ -27,6 +27,7 @@ from typing import Any
 from verdandi.diff import diff
 from verdandi.odin3.abcsteps import (
     TITLES,
+    _parse_stats,
     abc_script,
     capture_abc_input,
     find_abc,
@@ -222,16 +223,6 @@ def _lut_k(arguments: str, default: int) -> int:
     return default
 
 
-def _lut_count(snapshot: dict[str, Any]) -> int:
-    """The LUT node count of an IR snapshot (what the real ``abc`` pass mapped)."""
-    return sum(
-        1
-        for module in snapshot.get("modules", [])
-        for node in module.get("nodes", [])
-        if node.get("type") == "$lut"
-    )
-
-
 def _no_abc_warning() -> None:
     """The one warning a recording without a standalone ABC binary prints (spec 9)."""
     print(
@@ -385,7 +376,7 @@ class _Recording:
         self.stage.snapshot = step.snapshot
         self.stage_by_name = self.stage_by_name or by_name
         self.stage.diff = diff(self.stage_before, snapshot, by_name=self.stage_by_name)
-        self._mark_illustrations(abc_children, abc_stats, snapshot)
+        self._mark_illustrations(abc_children, abc_stats, step.log)
         if name == "read_verilog":
             return self._ast_children(step, design, refs)
         return None
@@ -440,12 +431,18 @@ class _Recording:
 
     @staticmethod
     def _mark_illustrations(
-        children: list[Step], stats: dict[str, int], snapshot: dict[str, Any]
+        children: list[Step], stats: dict[str, int], log: list[str]
     ) -> None:
-        """Mark the ABC sub-steps when their LUT count differs from the real pass's."""
+        """Mark the ABC sub-steps when their network differs from the linked run's.
+
+        Both sides are ABC's own network node count ``nd`` for the same exchange run: LUTs and
+        one-input buffer nodes alike, so the two numbers compare like with like. The replay
+        follows run 0, whose ``print_stats`` line is the first in the linked pass's log.
+        """
         if not children or "nd" not in stats:
             return
-        if stats["nd"] != _lut_count(snapshot):
+        linked = _parse_stats(log, first=True)
+        if "nd" in linked and linked["nd"] != stats["nd"]:
             for child in children:
                 child.illustration = True
 

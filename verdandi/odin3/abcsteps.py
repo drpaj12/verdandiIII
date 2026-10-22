@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -188,9 +189,14 @@ def _drop_dot_header(path: Path) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
-def _parse_stats(log: list[str]) -> dict[str, int]:
-    """The ``print_stats`` numbers of a run: i/o as ``i`` and ``o``, and the named fields."""
-    for line in reversed(log):
+def _parse_stats(log: list[str], *, first: bool = False) -> dict[str, int]:
+    """The ``print_stats`` numbers of a run: i/o as ``i`` and ``o``, and the named fields.
+
+    A replay's log holds one ``print_stats`` line, read from its end; a linked pass's log holds
+    one line per exchange run, and the replay follows run 0, so the recorder reads the first.
+    """
+    lines: Iterable[str] = log if first else reversed(log)
+    for line in lines:
         if "i/o" not in line:
             continue
         stats: dict[str, int] = {}

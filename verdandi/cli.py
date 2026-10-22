@@ -8,7 +8,7 @@ from collections import Counter
 from pathlib import Path
 
 from verdandi.odin3.record import record
-from verdandi.trace import load
+from verdandi.trace import _checked_name, load
 
 SUBCOMMANDS = {
     "record": "record a design through Odin III into a trace",
@@ -64,9 +64,7 @@ def _record(args: argparse.Namespace) -> int:
 
 def _snapshot_size(directory: Path, name: str) -> int:
     """The size of one snapshot file; a name that leaves snap/ is refused."""
-    if name != Path(name).name:
-        raise ValueError(f"snapshot name {name!r} escapes the trace directory")
-    return (directory / "snap" / name).stat().st_size
+    return (directory / "snap" / _checked_name(name, "snapshot")).stat().st_size
 
 
 def _info(args: argparse.Namespace) -> int:
@@ -74,7 +72,7 @@ def _info(args: argparse.Namespace) -> int:
         trace = load(args.trace)
         names = {step.snapshot for step in trace.steps if step.snapshot is not None}
         total = sum(_snapshot_size(trace.directory, name) for name in names)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f"verdandi info: {exc}", file=sys.stderr)
         return 2
     counts = Counter(step.level for step in trace.steps)

@@ -14,8 +14,9 @@ line that logs it.
 Every step carries a diff: an L1 IR step against the previous IR snapshot (by name across a
 renumbering pass), an L0 stage against the previous stage's final IR snapshot, an L2 AST step
 and an L2 ABC step the empty diff. A failing pass marks its step failed, writes the trace up
-to it and returns 1; a snapshot over ``max_nodes`` refuses the recording and returns 2, naming
-the step.
+to it and returns 1; a pass, AST or stage snapshot over ``max_nodes`` refuses the recording
+and returns 2, naming the step, while an over-size sub-step snapshot only warns (a copy's
+intermediate state is not the pass's own result).
 """
 
 from __future__ import annotations
@@ -509,8 +510,12 @@ class _Recording:
         for title, snapshot, log in entries:
             over = _over_size(title, snapshot, self.max_nodes)
             if over is not None:
-                print(f"verdandi record: {over}", file=sys.stderr)
-                return 2
+                # A copy's intermediate state is not the pass's result: the pass's own L1
+                # snapshot enforces the bound, so an over-size sub-step only warns.
+                print(
+                    f"verdandi record: warning: sub-step of pass '{pass_name}': {over}",
+                    file=sys.stderr,
+                )
             sub_name = title.split(maxsplit=1)[0]
             grouping = title.startswith(ITERATION_PREFIX)
             if grouping:

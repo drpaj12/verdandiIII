@@ -425,6 +425,40 @@ class RecorderTest(unittest.TestCase):
             self.assertEqual(code, 2)
             self.assertIn("read_verilog", stderr.getvalue())
 
+    def test_size_guard_skips_substep_snapshots(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc"
+            )
+            # Every real snapshot of this script has at most 28 AST nodes; the copy's stop
+            # point has 40, over the bound, but a copy's intermediate state is not the pass's.
+            nodes = [
+                {"id": ident, "name": f"n{ident}", "type": "$and", "params": {}, "pins": []}
+                for ident in range(1, 41)
+            ]
+            big = {"kind": "ir", "modules": [{"name": "counter2", "nodes": nodes, "nets": []}]}
+            out = Path(tmp) / "trace"
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(
+                    record_module, "expand", return_value=[("proc --stop-after clean", big, [])]
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = record(
+                    [source], top, out, techlib=library, script=script, max_nodes=28
+                )
+            self.assertEqual(code, 0, stderr.getvalue())
+            self.assertIn("sub-step of pass 'proc'", stderr.getvalue())
+            trace = load(out)
+            step = next(s for s in trace.steps if s.title == "proc --stop-after clean")
+            self.assertEqual(step.snapshot, f"{step.id}.json")
+
     def test_stage_map_passes_exist(self) -> None:
         import odin3
 

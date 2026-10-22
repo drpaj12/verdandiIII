@@ -1,0 +1,232 @@
+"""Trace model and file format version 1.
+
+A trace is a directory: ``manifest.json``, ``steps.json``, ``snap/``, ``src/`` and, for ABC
+steps, ``pic/``. JSON is deterministic: keys sorted, one-space indent, one trailing newline.
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+
+FORMAT_VERSION = 1
+
+
+@dataclass(frozen=True)
+class ObjRef:
+    """One IR object touched by a step; kind is "node", "net" or "wire"."""
+
+    module: str
+    kind: str
+    id: int
+    name: str
+
+
+@dataclass
+class Diff:
+    """Objects added, removed and changed between two snapshots."""
+
+    added: list[ObjRef]
+    removed: list[ObjRef]
+    changed: list[ObjRef]
+    by_name: bool
+
+
+@dataclass
+class CodeRef:
+    """A span in the Odin III source tree; file is relative to its root."""
+
+    file: str
+    line: int
+    end_line: int
+    function: str | None
+
+
+@dataclass
+class Step:
+    """One node of the playthrough tree, level 0 (stage) to 3 (event)."""
+
+    id: str
+    parent: str | None
+    level: int
+    title: str
+    anchor: str
+    snapshot: str | None = None
+    diff: Diff | None = None
+    code: list[CodeRef] = field(default_factory=list)
+    log: list[str] = field(default_factory=list)
+    illustration: bool = False
+    failed: bool = False
+    picture: str | None = None
+
+
+@dataclass
+class Manifest:
+    """Trace identity: program, source tree commit, inputs and script."""
+
+    version: int
+    program: str
+    program_version: str
+    abi: int
+    source_commit: str
+    files: list[str]
+    top: str
+    arch: str | None
+    script: str
+    stage_map_version: int
+    recorded: str
+
+
+class Trace:
+    """A loaded trace: manifest, steps and lazily read snapshots."""
+
+    def __init__(self, directory: Path, manifest: Manifest, steps: list[Step]) -> None:
+        self.directory = Path(directory)
+        self.manifest = manifest
+        self.steps = list(steps)
+        self._by_id: dict[str, Step] = {}
+        self._children: dict[str | None, list[Step]] = {}
+        for step in self.steps:
+            self._by_id[step.id] = step
+            self._children.setdefault(step.parent, []).append(step)
+        self._snapshots: dict[str, dict[str, Any]] = {}
+
+    def children(self, step_id: str | None) -> list[Step]:
+        """Children in recording order; ``None`` gives the roots (level 0)."""
+        return list(self._children.get(step_id, []))
+
+    def step(self, step_id: str) -> Step:
+        return self._by_id[step_id]
+
+    def snapshot(self, step: Step) -> dict[str, Any] | None:
+        """The step's snapshot, read once and cached; None when it has no snapshot."""
+        if step.snapshot is None:
+            return None
+        if step.snapshot not in self._snapshots:
+            path = self.directory / "snap" / step.snapshot
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(loaded, dict):
+                raise ValueError(f"snapshot {step.snapshot} is not a JSON object")
+            self._snapshots[step.snapshot] = loaded
+        return self._snapshots[step.snapshot]
+
+
+def save(
+    directory: Path,
+    manifest: Manifest,
+    steps: list[Step],
+    snapshots: dict[str, dict[str, Any]],
+    sources: list[Path],
+    pictures: dict[str, Path] | None = None,
+) -> None:
+    """Write a trace directory; snapshots are keyed by the names in ``Step.snapshot``."""
+    directory = Path(directory)
+    snap_dir = directory / "snap"
+    src_dir = directory / "src"
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    src_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(directory / "manifest.json", asdict(manifest))
+    _write_json(directory / "steps.json", [asdict(step) for step in steps])
+    for name, snapshot in snapshots.items():
+        _write_json(snap_dir / name, snapshot)
+    for source in sources:
+        shutil.copyfile(source, src_dir / source.name)
+    if pictures:
+        pic_dir = directory / "pic"
+        pic_dir.mkdir(parents=True, exist_ok=True)
+        for name, picture in pictures.items():
+            shutil.copyfile(picture, pic_dir / name)
+
+
+def load(directory: Path) -> Trace:
+    """Read a trace directory; refuse a format version newer than this player."""
+    directory = Path(directory)
+    manifest_data = _read_json_object(directory / "manifest.json")
+    version = int(manifest_data["version"])
+    if version > FORMAT_VERSION:
+        raise ValueError(f"trace format {version} is newer than {FORMAT_VERSION}")
+    steps_data = json.loads((directory / "steps.json").read_text(encoding="utf-8"))
+    if not isinstance(steps_data, list):
+        raise ValueError("steps.json is not a JSON array")
+    steps = [_step_from_dict(item) for item in steps_data]
+    return Trace(directory, _manifest_from_dict(manifest_data), steps)
+
+
+def _write_json(path: Path, data: Any) -> None:
+    text = json.dumps(data, sort_keys=True, indent=1)
+    path.write_text(text + "\n", encoding="utf-8", newline="\n")
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        raise ValueError(f"{path.name} is not a JSON object")
+    return loaded
+
+
+def _optional_str(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+def _obj_ref_from_dict(data: dict[str, Any]) -> ObjRef:
+    return ObjRef(
+        module=str(data["module"]),
+        kind=str(data["kind"]),
+        id=int(data["id"]),
+        name=str(data["name"]),
+    )
+
+
+def _diff_from_dict(data: dict[str, Any]) -> Diff:
+    return Diff(
+        added=[_obj_ref_from_dict(item) for item in data["added"]],
+        removed=[_obj_ref_from_dict(item) for item in data["removed"]],
+        changed=[_obj_ref_from_dict(item) for item in data["changed"]],
+        by_name=bool(data["by_name"]),
+    )
+
+
+def _code_ref_from_dict(data: dict[str, Any]) -> CodeRef:
+    return CodeRef(
+        file=str(data["file"]),
+        line=int(data["line"]),
+        end_line=int(data["end_line"]),
+        function=_optional_str(data.get("function")),
+    )
+
+
+def _step_from_dict(data: dict[str, Any]) -> Step:
+    diff_data = data.get("diff")
+    return Step(
+        id=str(data["id"]),
+        parent=_optional_str(data.get("parent")),
+        level=int(data["level"]),
+        title=str(data["title"]),
+        anchor=str(data["anchor"]),
+        snapshot=_optional_str(data.get("snapshot")),
+        diff=None if diff_data is None else _diff_from_dict(diff_data),
+        code=[_code_ref_from_dict(item) for item in data.get("code", [])],
+        log=[str(line) for line in data.get("log", [])],
+        illustration=bool(data.get("illustration", False)),
+        failed=bool(data.get("failed", False)),
+        picture=_optional_str(data.get("picture")),
+    )
+
+
+def _manifest_from_dict(data: dict[str, Any]) -> Manifest:
+    return Manifest(
+        version=int(data["version"]),
+        program=str(data["program"]),
+        program_version=str(data["program_version"]),
+        abi=int(data["abi"]),
+        source_commit=str(data["source_commit"]),
+        files=[str(name) for name in data["files"]],
+        top=str(data["top"]),
+        arch=_optional_str(data.get("arch")),
+        script=str(data["script"]),
+        stage_map_version=int(data["stage_map_version"]),
+        recorded=str(data["recorded"]),
+    )

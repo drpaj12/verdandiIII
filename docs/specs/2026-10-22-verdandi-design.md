@@ -81,7 +81,8 @@ A directory:
   the stage map version, record time.
 - `steps.json`: the step tree: `id`, `parent`, `level`, `title`, `anchor` (e.g. `pass:opt_expr`),
   `snapshot` (file name), `diff`, `code` (list of `{file, line, end_line, function}`), `log` (lines),
-  `events` (L3 children), `illustration` (bool).
+  `illustration` (bool), `failed` (bool), `picture` (a graph file under `pic/`, for ABC steps). L2 and L3
+  steps are ordinary child steps (`parent` set, `level` 2 or 3).
 - `snap/<id>.json`: IR snapshot: modules, each with nodes (`id`, `name`, `type`, `params`, `pins`
   as `{port, bit, net}`, `sources`), nets (`id`, `name`, `drivers`, `sinks`, `sources`), wires; or an
   AST snapshot (`kind`, `sub`, `name`, `loc`, `children`). Deterministic order (by ID).

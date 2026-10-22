@@ -156,6 +156,21 @@ class DiffTest(unittest.TestCase):
             ),
         )
 
+    def test_absent_field_matches_empty(self) -> None:
+        sparse_node = node(1, "a")
+        del sparse_node["params"]
+        del sparse_node["pins"]
+        sparse_net = net(2, "n")
+        del sparse_net["drivers"]
+        del sparse_net["sinks"]
+        before = ir(module("top", nodes=[sparse_node], nets=[sparse_net]))
+        after = ir(module("top", nodes=[node(1, "a")], nets=[net(2, "n")]))
+        self.assertEqual(diff(before, after).changed, [])
+        gained = ir(
+            module("top", nodes=[node(1, "a", params={"WIDTH": "2"})], nets=[net(2, "n")])
+        )
+        self.assertEqual(diff(before, gained).changed, [ObjRef("top", "node", 1, "a")])
+
     def test_duplicate_keys_raise(self) -> None:
         duplicate_ids = ir(module("top", nodes=[node(1, "a"), node(1, "b")]))
         duplicate_names = ir(module("top", nodes=[node(1, "a"), node(2, "a")]))

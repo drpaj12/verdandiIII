@@ -92,10 +92,20 @@ def _remap(
     return item
 
 
+# The empty value of a changed field, used when a producer omits the field: absent must compare
+# equal to present-empty, or every object turns amber.
+_EMPTY: dict[str, Any] = {"type": "", "params": {}, "pins": [], "drivers": [], "sinks": []}
+
+
+def _field(item: dict[str, Any], name: str) -> Any:
+    """The field's value, or its empty value when the producer omitted it."""
+    return item[name] if name in item else _EMPTY[name]
+
+
 def _changed(kind: str, before: dict[str, Any], after: dict[str, Any]) -> bool:
     """True when an object matched by key differs in its content fields."""
     return any(
-        before.get(field) != after.get(field) for field in _CHANGED_FIELDS.get(kind, ())
+        _field(before, field) != _field(after, field) for field in _CHANGED_FIELDS.get(kind, ())
     )
 
 

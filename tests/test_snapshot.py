@@ -148,6 +148,27 @@ class SnapshotTest(unittest.TestCase):
         with self.assertRaises(self.failureException):
             self.assert_snapshot_complete(design, snapshot)
 
+    def test_proc_body_param_skipped(self) -> None:
+        """A $proc's BODY (unbounded RTLIL text) is not embedded in the snapshot."""
+        with tempfile.TemporaryDirectory() as tmp:
+            design = read_design(write_micro(COUNTER2, Path(tmp)))  # pre-proc: $proc is live
+            self.addCleanup(design.close)
+            snapshot = ir_snapshot(design)
+            proc_params = 0
+            for module_snapshot in snapshot["modules"]:
+                module = design.module(module_snapshot["name"])
+                assert module is not None
+                listed = {node["id"]: node["params"] for node in module_snapshot["nodes"]}
+                for node in module.nodes():
+                    params = node.params()
+                    for index, name in enumerate(params):
+                        if node.param_kind(index) == "PROC":
+                            proc_params += 1
+                            self.assertNotIn(
+                                name, listed[node.id], f"node {node.id}: PROC param {name}"
+                            )
+        self.assertGreater(proc_params, 0, "no PROC param before proc: the skip is untested")
+
     def test_ast_forms(self) -> None:
         top, _text = COUNTER2
         with tempfile.TemporaryDirectory() as tmp:

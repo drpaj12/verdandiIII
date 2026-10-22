@@ -34,6 +34,21 @@ def _node_ids(pins: list[odin3.Pin]) -> list[int]:
     return ids
 
 
+def _node_params(node: odin3.Node) -> dict[str, int | str]:
+    """The node's parameters, PROC-kind values skipped (spec 5, snapshots).
+
+    A PROC value is a $proc's whole RTLIL body: unbounded text that the node-count size guard
+    cannot bound, so it stays out of the snapshot. params() lists names and values together in
+    parameter order, which is the order param_kind indexes into.
+    """
+    params = node.params()
+    return {
+        name: value
+        for index, (name, value) in enumerate(params.items())
+        if node.param_kind(index) != "PROC"
+    }
+
+
 def _node_dict(node: odin3.Node) -> dict[str, Any]:
     pins = []
     for pin in node.pins():
@@ -43,7 +58,7 @@ def _node_dict(node: odin3.Node) -> dict[str, Any]:
         "id": node.id,
         "name": node.name,
         "type": node.type_name,
-        "params": node.params(),
+        "params": _node_params(node),
         "pins": pins,
         "sources": _source_rows(node),
     }

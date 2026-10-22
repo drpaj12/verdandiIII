@@ -380,7 +380,18 @@ class _Recording:
             code=refs,
         )
         before_snapshot = self.previous
-        before = design.copy() if name in _EXPANDED else None
+        before = None
+        if name in _EXPANDED:
+            try:
+                before = design.copy()
+            except (OSError, RuntimeError, ValueError) as exc:
+                # The copy only carries the sub-steps; without it the recording would show
+                # less than the trace promises, so it ends as a usage error, not a traceback.
+                print(
+                    f"verdandi record: the sub-steps of '{command}' are not available: {exc}",
+                    file=sys.stderr,
+                )
+                return 2
         try:
             abc_children: list[Step] = []
             abc_stats: dict[str, int] = {}

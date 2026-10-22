@@ -365,6 +365,32 @@ class RecorderTest(unittest.TestCase):
             self.assertEqual(len(step.log), 1, step.log)
             self.assertTrue(step.log[0].startswith("pass write_blif:"), step.log)
 
+    def test_copy_error_is_a_usage_error(self) -> None:
+        import odin3
+
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc"
+            )
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(
+                    odin3.Design, "copy", side_effect=RuntimeError("copy refused")
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = record(
+                    [source], top, Path(tmp) / "trace", techlib=library, script=script
+                )
+            self.assertEqual(code, 2, stderr.getvalue())
+            self.assertTrue(stderr.getvalue().startswith("verdandi record: "))
+            self.assertIn("sub-steps of 'proc'", stderr.getvalue())
+
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()
         top, _text = COUNTER2

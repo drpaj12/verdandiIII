@@ -54,6 +54,24 @@ class RealTreeLocatorTest(unittest.TestCase):
         self.assertIn(Path("src/passes/partial_map/register.c"), locator.pass_files("hardmap"))
         self.assertTrue(locator.pass_files("read_verilog"))
 
+    def test_real_tree_opt_family_pass_files(self) -> None:
+        assert ODIN3_ROOT is not None
+        locator = Locator(ODIN3_ROOT)
+        expected = sorted(
+            path.relative_to(ODIN3_ROOT) for path in (ODIN3_ROOT / "src/passes/opt").glob("*.c")
+        )
+        self.assertEqual(len(expected), 34)
+        self.assertEqual(locator.pass_files("opt"), expected)
+        self.assertEqual(locator.pass_files("wreduce"), expected)
+
+    def test_real_tree_find_text_opt_expr(self) -> None:
+        assert ODIN3_ROOT is not None
+        locator = Locator(ODIN3_ROOT)
+        refs = locator.find_text(
+            locator.pass_files("opt"), "opt_expr: module '%s': %s on %s '%s'"
+        )
+        self.assertIn(("src/passes/opt/expr.c", 322), [(ref.file, ref.line) for ref in refs])
+
 
 if __name__ == "__main__":
     unittest.main()

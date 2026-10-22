@@ -2,11 +2,14 @@
 
 The tree is read at record time, never changed. A pass is found by the string literal of its
 ``odin3_pass_def`` usage entry (the ``"<name>"`` literal followed within three lines by a
-literal starting with ``"<name> "`` or ``"<name>:"``); its files are that registering file's
-directory, minus the per-file split when the directory is ``src/passes`` itself. Functions come
-from a C function-definition scan of those files, and the line that logs an L3 event from a
-plain text search. No compiler or external parser is involved: a scan that finds nothing gives
-the pass's files only.
+literal starting with ``"<name> "`` or ``"<name>:"``); when no file matches, a macro-registered
+family is found by a second clause: a ``.c`` holding the token ``odin3_pass_def`` plus both the
+``"<name>"`` literal and the usage literal anywhere in the file (``OPT_DEF`` in
+``src/passes/opt/register.c``). Its files are that registering file's directory, minus the
+per-file split when the directory is ``src/passes`` itself. Functions come from a C
+function-definition scan of those files, and the line that logs an L3 event from a plain text
+search. No compiler or external parser is involved: a scan that finds nothing gives the pass's
+files only.
 """
 
 from __future__ import annotations
@@ -118,20 +121,41 @@ class Locator:
         return value if done.returncode == 0 and value else "unknown"
 
     def _registering(self, name: str) -> Path | None:
-        """The .c file whose pass definition carries ``name``'s usage string."""
+        """The .c file that registers ``name``: the 3-line rule, else the macro-registered rule."""
         if self._root is None:
             return None
-        for source_root in _SOURCE_ROOTS:
-            base = self._root / source_root
-            if not base.is_dir():
-                continue
-            for path in sorted(base.rglob("*.c")):
-                lines = self._lines(path)
-                if lines is None:
-                    continue
-                if self._usage_follows(lines, name):
-                    return path
+        paths = [
+            path
+            for source_root in _SOURCE_ROOTS
+            if (self._root / source_root).is_dir()
+            for path in sorted((self._root / source_root).rglob("*.c"))
+        ]
+        for path in paths:
+            lines = self._lines(path)
+            if lines is not None and self._usage_follows(lines, name):
+                return path
+        for path in paths:
+            lines = self._lines(path)
+            if lines is not None and self._defines_pass(lines, name):
+                return path
         return None
+
+    @staticmethod
+    def _defines_pass(lines: list[str], name: str) -> bool:
+        """True when the file holds ``odin3_pass_def``, ``"<name>"`` and its usage."""
+        if "odin3_pass_def" not in "\n".join(lines):
+            return False
+        exact = False
+        usage = False
+        for line in lines:
+            for literal in _literals(line):
+                exact = exact or literal == name
+                usage = usage or (
+                    literal == name
+                    or literal.startswith(name + " ")
+                    or literal.startswith(name + ":")
+                )
+        return exact and usage
 
     @staticmethod
     def _usage_follows(lines: list[str], name: str) -> bool:

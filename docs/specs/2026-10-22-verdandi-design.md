@@ -97,6 +97,12 @@ limit (default 5000 nodes) with a clear message.
 
 For a pass name, the registering file is found by its `odin3_pass_def` usage string in
 `src/passes/**` (and `src/frontends/**` for readers); the pass's files are that file's directory.
+The name literal and the usage string normally sit on adjacent lines. A macro-registered family
+(Odin III's `OPT_DEF` in `src/passes/opt/register.c`: the names in `k_pass_names`, the usage strings
+~468 lines below) is found by a second clause, tried only when the first finds nothing: the file
+contains the token `odin3_pass_def`, a literal equal to `"<name>"` and a usage literal anywhere in
+the file. Requiring the token keeps a stray pass-name literal in an unrelated file (a reader's
+format table) from winning.
 Functions are found by a C function-definition scan of those files (name, start and end line). For
 an L3 event, the rule name in the log line is searched in the pass's files to give the line that logs
 it. Everything is read from `ODIN3_ROOT` at record time, so it follows the current source. No

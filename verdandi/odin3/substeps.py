@@ -51,7 +51,9 @@ OPT_LOOP: list[str] = [
     "opt_expr",
 ]
 
-# The driver's own cap (ODIN3_OPT_MAX_ITERATIONS): a loop that does not settle stops here.
+# The recorder's own cap (plan Task 8), not the library's: ODIN3_OPT_MAX_ITERATIONS is 10000,
+# so a loop that needs more than these ten iterations stops here and its sub-steps are marked
+# illustration against the real pass's result.
 OPT_MAX_ITERATIONS = 10
 
 # An iteration group's title prefix; its entries carry the iteration's end snapshot.

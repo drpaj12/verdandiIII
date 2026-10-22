@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import verdandi.odin3.substeps as substeps_module
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, IFELSE_REG
 from tests.test_record import techlib, write_micro
@@ -91,6 +92,19 @@ class OptOrderTest(unittest.TestCase):
         self.assertEqual([name for name in source if name != "opt_share"], expected)
         self.assertEqual(source.index("opt_share"), source.index("opt_merge") + 1)
         self.assertEqual(OPT_LOOP.index("opt_share"), OPT_LOOP.index("opt_merge") + 1)
+
+
+class IterationCapCommentTest(unittest.TestCase):
+    def test_cap_comment_cites_the_plan_and_the_library_cap(self) -> None:
+        source = Path(substeps_module.__file__).read_text(encoding="utf-8")
+        lines = source.splitlines()
+        index = next(
+            number for number, line in enumerate(lines) if line.startswith("OPT_MAX_ITERATIONS =")
+        )
+        comment = "\n".join(lines[max(0, index - 4) : index]).lower()
+        # 10 is the recorder's cap, not the library's (ODIN3_OPT_MAX_ITERATIONS = 10000).
+        self.assertIn("10000", comment)
+        self.assertIn("plan", comment)
 
 
 class OptFixedPointTest(unittest.TestCase):

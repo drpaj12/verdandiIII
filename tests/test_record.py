@@ -21,8 +21,9 @@ import verdandi.odin3.record as record_module
 from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, Micro
 from verdandi.diff import diff
+from verdandi.odin3.locator import Locator
 from verdandi.odin3.record import _check_top, default_script, record
-from verdandi.trace import Diff, load
+from verdandi.trace import CodeRef, Diff, load
 
 STAGES_FILE = Path(__file__).resolve().parent.parent / "verdandi" / "odin3" / "stages.json"
 
@@ -49,6 +50,58 @@ def stage_map() -> dict[str, str]:
     return {
         name: str(stage["title"]) for stage in data["stages"] for name in stage["passes"]
     }
+
+
+@unittest.skipUnless(HAVE_ODIN3 and ODIN3_ROOT is not None, "the odin3 binding and source tree")
+class EventCacheTest(unittest.TestCase):
+    def test_pass_files_scanned_once_per_pass(self) -> None:
+        import odin3
+
+        class CountingLocator(Locator):
+            def __init__(self, root: Path) -> None:
+                super().__init__(root)
+                self.files_calls: list[str] = []
+                self.find_calls: list[str] = []
+
+            def pass_files(self, name: str) -> list[Path]:
+                self.files_calls.append(name)
+                return super().pass_files(name)
+
+            def find_log_text(self, files: list[Path], text: str) -> list[CodeRef]:
+                self.find_calls.append(text)
+                return super().find_log_text(files, text)
+
+        assert ODIN3_ROOT is not None
+        locator = CountingLocator(ODIN3_ROOT)
+        recording = record_module._Recording(
+            files=[],
+            top="and_zero",
+            out=Path("trace"),
+            arch=None,
+            script="",
+            stage_version=1,
+            titles={},
+            locator=locator,
+            odin3_root=ODIN3_ROOT,
+            source_commit="unknown",
+            library=odin3.default(),
+            max_nodes=5000,
+            abc=None,
+            k=6,
+            workdir=Path("."),
+        )
+        parent = record_module._new_step(
+            recording.steps, parent=None, level=1, title="opt_expr", anchor="pass:opt_expr"
+        )
+        line = "opt_expr: module 'and_zero': const_and on $and '$c1'"
+        recording._events(parent, "opt_expr", [line])
+        recording._events(parent, "opt_expr", [line])
+        recording._pass_refs("opt_expr")
+        # The pass's files and each format's refs resolve once per recording, not per event.
+        self.assertEqual(locator.files_calls, ["opt_expr"])
+        self.assertEqual(locator.find_calls, ["opt_expr: module '"])
+        children = [step for step in recording.steps if step.parent == parent.id]
+        self.assertEqual([child.level for child in children], [3, 3])
 
 
 class LevelIsALabelTest(unittest.TestCase):

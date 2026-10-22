@@ -199,10 +199,10 @@ def _env_root() -> Path | None:
     return None
 
 
-def _code_refs(locator: Locator, name: str, root: Path | None) -> list[CodeRef]:
+def _code_refs(locator: Locator, files: list[Path], root: Path | None) -> list[CodeRef]:
     """One CodeRef per registering file, the whole file (an event's ref is the line that logs)."""
     refs: list[CodeRef] = []
-    for path in locator.pass_files(name):
+    for path in files:
         end_line = 1
         if root is not None:
             try:
@@ -326,14 +326,23 @@ class _Recording:
         self.stage_before: dict[str, Any] | None = None
         self.stage_by_name = False
         self.warned_no_abc = False
+        self._files_cache: dict[str, list[Path]] = {}
         self._code_cache: dict[str, list[CodeRef]] = {}
         self._ref_cache: dict[tuple[str, str], list[CodeRef]] = {}
+
+    def _pass_files(self, name: str) -> list[Path]:
+        """The pass's source files, located once per recording (the locator caches nothing)."""
+        files = self._files_cache.get(name)
+        if files is None:
+            files = self.locator.pass_files(name)
+            self._files_cache[name] = files
+        return files
 
     def _pass_refs(self, name: str) -> list[CodeRef]:
         """The pass's code refs, computed once per recording."""
         refs = self._code_cache.get(name)
         if refs is None:
-            refs = _code_refs(self.locator, name, self.odin3_root)
+            refs = _code_refs(self.locator, self._pass_files(name), self.odin3_root)
             self._code_cache[name] = refs
         return refs
 
@@ -458,7 +467,7 @@ class _Recording:
         """
         if pass_name not in PATTERNS:
             return
-        files = self.locator.pass_files(pass_name)
+        files = self._pass_files(pass_name)
         for line in log:
             found = match_event(pass_name, line)
             if found is None:

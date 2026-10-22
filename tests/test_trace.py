@@ -218,6 +218,30 @@ class TraceSafetyTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 trace.snapshot(trace.step("s0001"))
 
+    def test_duplicate_source_names_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            first = Path(work) / "a" / "counter.v"
+            first.parent.mkdir()
+            first.write_text("module counter;\nendmodule\n", encoding="utf-8")
+            second = Path(work) / "b" / "counter.v"
+            second.parent.mkdir()
+            second.write_text("module other;\nendmodule\n", encoding="utf-8")
+            with self.assertRaises(ValueError) as caught:
+                save(Path(work) / "trace", make_manifest(), [], {}, [first, second])
+            self.assertIn("counter.v", str(caught.exception))
+
+    def test_names_colliding_ignoring_case_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            source = Path(work) / "strash.dot"
+            source.write_bytes(b"digraph G {\n}\n")
+            trace_dir = Path(work) / "trace"
+            with self.subTest(kind="snapshot"), self.assertRaises(ValueError):
+                save(trace_dir, make_manifest(), [],
+                     {"s0001.json": {"kind": "ir"}, "S0001.json": {"kind": "ir"}}, [])
+            with self.subTest(kind="picture"), self.assertRaises(ValueError):
+                save(trace_dir, make_manifest(), [], {}, [],
+                     pictures={"a.dot": source, "A.dot": source})
+
 
 if __name__ == "__main__":
     unittest.main()

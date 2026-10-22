@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -125,10 +126,9 @@ def save(
 ) -> None:
     """Write a trace directory; snapshots are keyed by the names in ``Step.snapshot``."""
     directory = Path(directory)
-    for name in snapshots:
-        _checked_name(name, "snapshot")
-    for name in pictures or {}:
-        _checked_name(name, "picture")
+    _check_unique([_checked_name(name, "snapshot") for name in snapshots], "snapshot")
+    _check_unique([_checked_name(name, "picture") for name in pictures or {}], "picture")
+    _check_unique([source.name for source in sources], "source")
     snap_dir = directory / "snap"
     src_dir = directory / "src"
     snap_dir.mkdir(parents=True, exist_ok=True)
@@ -167,6 +167,16 @@ def _checked_name(name: str, what: str) -> str:
     if name != Path(name).name or "/" in name or "\\" in name or Path(name).is_absolute():
         raise ValueError(f"{what} name {name!r} escapes the trace directory")
     return name
+
+
+def _check_unique(names: Iterable[str], what: str) -> None:
+    """Reject names that would collide; ignore case so a trace is portable."""
+    seen: dict[str, str] = {}
+    for name in names:
+        key = name.casefold()
+        if key in seen:
+            raise ValueError(f"duplicate {what} name {name!r} collides with {seen[key]!r}")
+        seen[key] = name
 
 
 def _write_json(path: Path, data: Any) -> None:

@@ -11,10 +11,12 @@ import unittest
 from pathlib import Path
 
 import verdandi.odin3.events as events_module
-from tests.helpers import HAVE_ODIN3
+from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import AND_ZERO
 from tests.test_record import techlib, write_micro
 from verdandi.odin3.events import events
+from verdandi.odin3.record import record
+from verdandi.trace import Diff, load
 
 
 class ExcludedFormatsTest(unittest.TestCase):
@@ -58,6 +60,51 @@ class EventsTest(unittest.TestCase):
         self.assertTrue(
             any(title.startswith("opt_expr: ") for title, _anchor in found), found
         )
+
+
+class RecordedEventsTest(unittest.TestCase):
+    @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
+    def test_recorded_events_are_l3_children_of_their_sub_pass(self) -> None:
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(AND_ZERO, Path(tmp))
+            out = Path(tmp) / "trace"
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; opt -full"
+            )
+            code = record(
+                [source],
+                AND_ZERO[0],
+                out,
+                techlib=library,
+                script=script,
+                odin3_root=ODIN3_ROOT,
+            )
+            self.assertEqual(code, 0)
+            trace = load(out)
+            opt_expr = [
+                step
+                for step in trace.steps
+                if step.level == 2 and step.anchor == "pass:opt_expr"
+            ]
+            self.assertTrue(opt_expr, "no opt_expr sub-step")
+            events = [
+                child
+                for step in opt_expr
+                for child in trace.children(step.id)
+                if child.anchor == "rule:opt_expr:const_and"
+            ]
+            self.assertTrue(events, "no const_and event")
+            empty = Diff(added=[], removed=[], changed=[], by_name=False)
+            for event in events:
+                self.assertEqual(event.level, 3)
+                self.assertIn(event.parent, {step.id for step in opt_expr})
+                self.assertIsNone(event.snapshot)
+                self.assertEqual(event.diff, empty)
 
 
 if __name__ == "__main__":

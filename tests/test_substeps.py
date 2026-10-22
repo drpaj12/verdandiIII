@@ -16,7 +16,15 @@ from tests.helpers import HAVE_ODIN3, ODIN3_ROOT
 from tests.micros import COUNTER2, IFELSE_REG
 from tests.test_record import techlib, write_micro
 from verdandi.odin3.record import record
-from verdandi.odin3.substeps import ITERATION_PREFIX, OPT_LOOP, SUBSTEPS, expand, matches
+from verdandi.odin3.substeps import (
+    ITERATION_PREFIX,
+    OPT_LOOP,
+    OPT_PROLOGUE,
+    SUBSTEPS,
+    expand,
+    matches,
+    opt_loop,
+)
 from verdandi.trace import load
 
 # The enum suffix of each opt sub-pass in src/passes/opt/opt_loop.c's k_default_loop.
@@ -133,6 +141,73 @@ class OptFixedPointTest(unittest.TestCase):
         self.assertGreaterEqual(len(iterations), 2, "the loop stopped before a repeat")
         self.assertLessEqual(len(iterations), 10)
         self.assertEqual(iterations[-1], iterations[-2], "the loop did not reach a fixed point")
+
+
+class FsmSubstepsTest(unittest.TestCase):
+    @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
+    def test_fsm_children_are_detect_then_fsm(self) -> None:
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            out = Path(tmp) / "trace"
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; fsm"
+            )
+            code = record(
+                [source], COUNTER2[0], out, techlib=library, script=script,
+                odin3_root=ODIN3_ROOT,
+            )
+            self.assertEqual(code, 0)
+            trace = load(out)
+            fsm = next(step for step in trace.steps if step.anchor == "pass:fsm")
+            children = trace.children(fsm.id)
+            self.assertEqual([child.title for child in children], ["fsm_detect", "fsm"])
+            for child in children:
+                self.assertEqual(child.level, 2, child.title)
+                self.assertEqual(child.parent, fsm.id, child.title)
+                self.assertIsNotNone(trace.snapshot(child), child.title)
+
+
+class OptIterationNestingTest(unittest.TestCase):
+    @unittest.skipUnless(HAVE_ODIN3, "the odin3 binding and library")
+    def test_iteration_groups_nest_their_sub_passes(self) -> None:
+        library = techlib()
+        if library is None:
+            self.skipTest("ODIN3_ROOT/lib/lpm.o3lib is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(IFELSE_REG, Path(tmp))
+            out = Path(tmp) / "trace"
+            script = (
+                f'read_techlib "{library}"; '
+                f'read_verilog --nolatches --vtr-compat "{source}"; '
+                "proc; opt -full"
+            )
+            code = record(
+                [source], IFELSE_REG[0], out, techlib=library, script=script,
+                odin3_root=ODIN3_ROOT,
+            )
+            self.assertEqual(code, 0)
+            trace = load(out)
+            opt = next(
+                step for step in trace.steps if step.anchor == "pass:opt" and step.level == 1
+            )
+            children = trace.children(opt.id)
+            prologue = children[: len(OPT_PROLOGUE)]
+            self.assertEqual([step.title for step in prologue], OPT_PROLOGUE)
+            groups = [step for step in children if step.title.startswith(ITERATION_PREFIX)]
+            self.assertGreaterEqual(len(groups), 2, "the loop stopped before a repeat")
+            for step in prologue:
+                self.assertEqual((step.level, step.parent), (2, opt.id), step.title)
+            for group in groups:
+                self.assertEqual((group.level, group.parent), (2, opt.id), group.title)
+                nested = trace.children(group.id)
+                self.assertEqual([step.title for step in nested], opt_loop(True), group.title)
+                for step in nested:
+                    self.assertEqual((step.level, step.parent), (2, group.id), step.title)
 
 
 class IterationGroupSnapshotTest(unittest.TestCase):

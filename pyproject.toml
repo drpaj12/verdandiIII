@@ -19,6 +19,10 @@ verdandi = "verdandi.cli:main"
 [tool.setuptools.packages.find]
 include = ["verdandi*"]
 
+[tool.setuptools.package-data]
+# The stage map is read at record time; without this a non-editable wheel omits it.
+"verdandi.odin3" = ["stages.json"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"

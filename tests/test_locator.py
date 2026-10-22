@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
 
@@ -43,6 +44,18 @@ class FixtureLocatorTest(unittest.TestCase):
         self.assertEqual(locator.functions(DEMO), [])
         self.assertEqual(locator.find_text([DEMO], DEMO_LOG), [])
         self.assertEqual(locator.commit(), "unknown")
+
+    def test_relative_root(self) -> None:
+        relative = Path(os.path.relpath(FIXTURE, Path.cwd()))
+        self.assertFalse(relative.is_absolute())
+        locator = Locator(relative)
+        self.assertEqual(locator.pass_files("demo"), [DEMO])
+        self.assertEqual(
+            [(ref.function, ref.line, ref.end_line) for ref in locator.functions(DEMO)],
+            [("demo_helper", 3, 5), ("demo_pass_run", 12, 20)],
+        )
+        refs = locator.find_text(locator.pass_files("demo"), DEMO_LOG)
+        self.assertEqual([(ref.file, ref.line) for ref in refs], [(str(DEMO), 14)])
 
 
 @unittest.skipUnless(ODIN3_ROOT is not None, "ODIN3_ROOT is not set")

@@ -40,7 +40,7 @@ class Locator:
     """Code locations in the Odin III source tree rooted at ``root`` (None: no tree)."""
 
     def __init__(self, root: Path | None) -> None:
-        self._root = root
+        self._root = root.resolve() if root is not None else None
 
     def pass_files(self, name: str) -> list[Path]:
         """The pass's C files, relative to the root; empty when it registers nowhere."""

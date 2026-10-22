@@ -317,6 +317,21 @@ class RecorderTest(unittest.TestCase):
                     child.diff, Diff(added=[], removed=[], changed=[], by_name=False)
                 )
 
+    def test_write_blif_log_keeps_info_only(self) -> None:
+        library = self.require_techlib()
+        top, _text = COUNTER2
+        with tempfile.TemporaryDirectory() as tmp:
+            source = write_micro(COUNTER2, Path(tmp))
+            out = Path(tmp) / "trace"
+            code = record([source], top, out, techlib=library, odin3_root=ODIN3_ROOT)
+            self.assertEqual(code, 0)
+            trace = load(out)
+            step = next(s for s in trace.steps if s.anchor == "pass:write_blif")
+            # The writer's report is DEBUG and capture_log keeps INFO and above, so the step
+            # log holds the timing line alone (agent default 6 said it kept the report).
+            self.assertEqual(len(step.log), 1, step.log)
+            self.assertTrue(step.log[0].startswith("pass write_blif:"), step.log)
+
     def test_record_failing_pass(self) -> None:
         library = self.require_techlib()
         top, _text = COUNTER2

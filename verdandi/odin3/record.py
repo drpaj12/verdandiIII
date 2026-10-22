@@ -278,7 +278,11 @@ class _Recording:
             design.close()
 
     def _command(self, design: Any, command: str) -> int | None:
-        """Record one script command; an exit code when the recording stops here."""
+        """Record one script command; an exit code when the recording stops here.
+
+        The step log is the library's INFO-and-above records. A pass that only reports at
+        DEBUG, such as write_blif's writer report, records just its timing line.
+        """
         parts = command.split(maxsplit=1)
         name = parts[0]
         arguments = parts[1].strip() if len(parts) > 1 else ""

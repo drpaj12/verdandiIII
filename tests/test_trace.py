@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -175,6 +176,47 @@ class TraceFileTest(unittest.TestCase):
                  [], pictures={"s0004.dot": picture})
             copied = Path(directory) / "pic" / "s0004.dot"
             self.assertEqual(copied.read_bytes(), data)
+
+
+class TraceSafetyTest(unittest.TestCase):
+    def test_snapshot_names_cannot_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            trace_dir = Path(work) / "trace"
+            escaped = Path(work) / "escaped.json"
+            for name in ("../../escaped.json", str(escaped)):
+                with self.subTest(name=name):
+                    with self.assertRaises(ValueError):
+                        save(trace_dir, make_manifest(), [], {name: {"kind": "ir"}}, [])
+                    self.assertFalse(escaped.exists())
+                    self.assertFalse(trace_dir.exists())
+
+    def test_picture_names_cannot_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            source = Path(work) / "strash.dot"
+            source.write_bytes(b"digraph G {\n}\n")
+            trace_dir = Path(work) / "trace"
+            escaped = Path(work) / "escaped.dot"
+            for name in ("../../escaped.dot", str(escaped)):
+                with self.subTest(name=name):
+                    with self.assertRaises(ValueError):
+                        save(trace_dir, make_manifest(), [], {}, [],
+                             pictures={name: source})
+                    self.assertFalse(escaped.exists())
+                    self.assertFalse(trace_dir.exists())
+
+    def test_loaded_snapshot_name_cannot_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            directory = Path(work) / "trace"
+            save(directory, make_manifest(), make_steps(), make_snapshots(), [])
+            outside = Path(work) / "secret.json"
+            outside.write_text('{"kind": "ir", "modules": []}\n', encoding="utf-8")
+            steps_path = directory / "steps.json"
+            data = json.loads(steps_path.read_text(encoding="utf-8"))
+            data[0]["snapshot"] = "../../secret.json"
+            steps_path.write_text(json.dumps(data), encoding="utf-8")
+            trace = load(directory)
+            with self.assertRaises(ValueError):
+                trace.snapshot(trace.step("s0001"))
 
 
 if __name__ == "__main__":

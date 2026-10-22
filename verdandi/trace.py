@@ -105,13 +105,14 @@ class Trace:
         """The step's snapshot, read once and cached; None when it has no snapshot."""
         if step.snapshot is None:
             return None
-        if step.snapshot not in self._snapshots:
-            path = self.directory / "snap" / step.snapshot
+        name = _checked_name(step.snapshot, "snapshot")
+        if name not in self._snapshots:
+            path = self.directory / "snap" / name
             loaded = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(loaded, dict):
-                raise ValueError(f"snapshot {step.snapshot} is not a JSON object")
-            self._snapshots[step.snapshot] = loaded
-        return self._snapshots[step.snapshot]
+                raise ValueError(f"snapshot {name} is not a JSON object")
+            self._snapshots[name] = loaded
+        return self._snapshots[name]
 
 
 def save(
@@ -124,6 +125,10 @@ def save(
 ) -> None:
     """Write a trace directory; snapshots are keyed by the names in ``Step.snapshot``."""
     directory = Path(directory)
+    for name in snapshots:
+        _checked_name(name, "snapshot")
+    for name in pictures or {}:
+        _checked_name(name, "picture")
     snap_dir = directory / "snap"
     src_dir = directory / "src"
     snap_dir.mkdir(parents=True, exist_ok=True)
@@ -153,6 +158,15 @@ def load(directory: Path) -> Trace:
         raise ValueError("steps.json is not a JSON array")
     steps = [_step_from_dict(item) for item in steps_data]
     return Trace(directory, _manifest_from_dict(manifest_data), steps)
+
+
+def _checked_name(name: str, what: str) -> str:
+    """A trace file name is one plain file name inside the trace directory."""
+    if not name or name in {".", ".."} or "\0" in name:
+        raise ValueError(f"{what} name {name!r} is not a file name")
+    if name != Path(name).name or "/" in name or "\\" in name or Path(name).is_absolute():
+        raise ValueError(f"{what} name {name!r} escapes the trace directory")
+    return name
 
 
 def _write_json(path: Path, data: Any) -> None:

@@ -22,6 +22,19 @@ It is for understanding, not for testing Odin III. It never changes Odin III.
 - D3. No debugger (no gdb). Each step shows code and data structure contents; less important steps
   may be a higher-level explanation or a picture of the relevant slice of the data.
 - D4. The method is general ("the Micro through the Macro"); Odin III is the first adapter.
+- D6. Approach A, record then replay: it is for learning the flow (Peter chose it over live stepping
+  and over trace points inside Odin III).
+- D7. The finest level is the pass log (one entry per logged rewrite); trace points inside Odin III
+  are a later option, not part of this design.
+- D8. The playthrough ends at `write_blif` (the netlist handed to VTR); VPR stages are a later group.
+- D9. The default playthrough is one small combined micro (a counter, an if/else register, a 4x4
+  multiply and an add); `record` takes any design.
+- D10. Notes: drafted from the Odin III paper and `docs/PASSES.md`, Peter edits them later; a step
+  without a note gets a generated summary and a picture of its data slice.
+- D11. ABC is opened up: each command of its script, including the K-LUT technology mapping
+  (`if -K`), is a step shown as a graph transformation on the example (section 6a).
+- D12. Its own package and app (`verdandi`, depends on the `odin3` package like Loki III); a Wyrd III
+  Tools menu entry comes later.
 - D5. It must follow code changes: everything is recorded from the current build and source tree;
   only short notes are written by hand, and a check flags notes whose anchor no longer exists.
 
@@ -87,6 +100,35 @@ an L3 event, the rule name in the log line is searched in the pass's files to gi
 it. Everything is read from `ODIN3_ROOT` at record time, so it follows the current source. No
 external parser is needed; a scan that finds nothing gives the pass's files only.
 
+## 6a. ABC as graph transformations
+
+Odin III's `abc` pass hands each module's soft logic (one run per clock domain) to linked ABC with the
+script `lib/abc/vtr.abc` (`strash; ifraig -v; scorr -v; dc2 -v; dch -f; if -K {K} -v; mfs2 -v;
+print_stats`). Verdandi opens that step without changing Odin III:
+
+1. On a copy of the design before `abc`, run `abc --lut K --via-blif DIR` to obtain the exact BLIF
+   exchanged with ABC (the files the pass writes in DIR; the plan verifies their names).
+2. Run the standalone ABC binary (`$ODIN3_ABC`, else `build/*/third_party/abc/abc`) on that input
+   one command at a time, from the same script file read at record time (so a script change is
+   followed): after each command `print_stats`, `write_dot` and `write_blif` give the step's numbers,
+   its graph picture and its network.
+3. Each command is an L2 step under the ABC stage, titled by what it does to the graph:
+   - `strash`: the logic becomes an AIG (two-input ANDs and inverted edges), structurally hashed so
+     equal subgraphs are shared;
+   - `ifraig`, `scorr`: nodes proven equal (combinationally, then across registers) are merged;
+   - `dc2`, `dch -f`: local rewriting and balancing of the AIG; `dch` keeps choice nodes, several
+     equivalent structures for the mapper to pick from;
+   - `if -K K` (the K-LUT technology mapping): every AIG node gets its K-feasible cuts, the mapper
+     picks a cover of the AIG by cuts, each chosen cut becomes one K-input LUT whose truth table is
+     the cut's function; shown as the AIG before and the LUT network after, with the example's LUT
+     count and depth from `print_stats`;
+   - `mfs2`: each LUT is simplified using don't-cares from its window (resubstitution).
+   The notes for these steps explain the transformation in words and point at the example's numbers
+   (nodes, levels, LUTs before and after).
+4. The real `abc` pass then runs on the real design (L1), and its result is the next snapshot. When
+   the standalone result differs from the linked one (LUT count), the L2 ABC steps are marked
+   "illustration".
+
 ## 7. Player (Wyrd III style)
 
 Main window panes:
@@ -120,7 +162,9 @@ entry (out of scope here).
 ## 9. Environment
 
 Python 3.11+, `odin3` package (cffi binding; `ODIN3_LIB`), `ODIN3_ROOT` (source tree, for code),
-PySide6 for the player (extra `gui`), Graphviz `dot` optional. Same setup as Loki III: CI installs the
+PySide6 for the player (extra `gui`), Graphviz `dot` optional, a standalone ABC binary for the
+opened-up ABC steps (`$ODIN3_ABC`, else `build/*/third_party/abc/abc` under `ODIN3_ROOT`; without one
+the ABC stage has its L1 step only and a warning). Same setup as Loki III: CI installs the
 odin3 v1.0.0 wheel and checks out the odin3 source at the matching tag.
 
 ## 10. Errors
@@ -138,5 +182,6 @@ tree and on the real `ODIN3_ROOT` (skipped when absent); player smoke test offsc
 
 ## 12. Out of scope (later)
 
-Lessons cut from playthroughs; trace points inside Odin III (a core change, Peter reviews); stepping
-inside ABC beyond its before/after; adapters for other programs; a web player for the docs site.
+Lessons cut from playthroughs; trace points inside Odin III (a core change, Peter reviews); the VPR
+stages (pack, place, route, with floorplan pictures); a Wyrd III Tools menu entry; adapters for other
+programs; a web player for the docs site.

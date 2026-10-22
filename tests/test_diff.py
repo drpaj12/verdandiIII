@@ -241,6 +241,31 @@ class DiffTest(unittest.TestCase):
             ),
         )
 
+    def test_empty_ir_sides_and_ast_before_ir_after(self) -> None:
+        snapshot = ir(
+            module(
+                "top",
+                nodes=[node(1, "a")],
+                nets=[net(2, "n", drivers=[1])],
+                wires=[wire(3, "w")],
+            )
+        )
+        refs = [
+            ObjRef("top", "node", 1, "a"),
+            ObjRef("top", "net", 2, "n"),
+            ObjRef("top", "wire", 3, "w"),
+        ]
+        self.assertEqual(
+            diff(ir(), snapshot), Diff(added=refs, removed=[], changed=[], by_name=False)
+        )
+        self.assertEqual(
+            diff(snapshot, ir()), Diff(added=[], removed=refs, changed=[], by_name=False)
+        )
+        ast = {"kind": "ast", "form": "PARSED", "roots": [{"kind": "module", "name": "top"}]}
+        self.assertEqual(
+            diff(ast, snapshot), Diff(added=[], removed=[], changed=[], by_name=False)
+        )
+
     def test_ast_snapshots_diff_to_empty(self) -> None:
         ast = {"kind": "ast", "form": "PARSED", "roots": [{"kind": "module", "name": "top"}]}
         before = ir(module("top", nodes=[node(1, "a")]))

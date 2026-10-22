@@ -114,6 +114,38 @@ class DiffTest(unittest.TestCase):
             [ObjRef("top", "node", 1, "pins"), ObjRef("top", "net", 5, "n")],
         )
 
+    def test_each_changed_field_alone(self) -> None:
+        cases = {
+            "type": (
+                ir(module("top", nodes=[node(1, "a")])),
+                ir(module("top", nodes=[node(1, "a", type_name="$mul")])),
+                ObjRef("top", "node", 1, "a"),
+            ),
+            "params": (
+                ir(module("top", nodes=[node(1, "a")])),
+                ir(module("top", nodes=[node(1, "a", params={"WIDTH": "2"})])),
+                ObjRef("top", "node", 1, "a"),
+            ),
+            "pins": (
+                ir(module("top", nodes=[node(1, "a")])),
+                ir(module("top", nodes=[node(1, "a", pins=[{"port": "Y", "bit": 0, "net": 2}])])),
+                ObjRef("top", "node", 1, "a"),
+            ),
+            "drivers": (
+                ir(module("top", nets=[net(2, "n")])),
+                ir(module("top", nets=[net(2, "n", drivers=[1])])),
+                ObjRef("top", "net", 2, "n"),
+            ),
+            "sinks": (
+                ir(module("top", nets=[net(2, "n")])),
+                ir(module("top", nets=[net(2, "n", sinks=[1])])),
+                ObjRef("top", "net", 2, "n"),
+            ),
+        }
+        for field, (previous, following, expected) in cases.items():
+            with self.subTest(field=field):
+                self.assertEqual(diff(previous, following).changed, [expected])
+
     def test_diff_across_compact(self) -> None:
         before = ir(
             module(

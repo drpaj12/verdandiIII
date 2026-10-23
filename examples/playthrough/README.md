@@ -1,8 +1,13 @@
-# The playthrough example
+# The playthrough example (the top of the five)
 
 `playthrough.v` is the design the Verdandi III manual walks through. Four small modules in one
 top: a 2-bit counter, a register with an if/else, a 4x4 multiplier, and the top that joins them.
 It is the same text as `tests/micros.py`'s `PLAYTHROUGH`.
+
+It is also the **top** example of the five: `counter`, `register`, `multiplier` and
+`instantiation` each record their module alone, and this one records the top that joins the
+first three. Each directory holds its own `.v`, README, notes and (after
+`examples/record-all.sh`) trace.
 
 Record it from the repository root with the k6 architecture (one command):
 

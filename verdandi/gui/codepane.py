@@ -6,7 +6,8 @@ entry point takes from the ``codeRoot`` app setting); every function span shown 
 in its depth's colour and the view scrolls to the first one. A missing file shows
 ``source not available: <file>`` in its tab instead of raising. The depth control follows the
 call graph of ``verdandi.callgraph``; a note beside it names the source that graph came from
-(the code-review-graph database or a static scan), so the two are never confused.
+(the code-review-graph database, marked "file scope" when a record covered no single function,
+or a static scan), so the two are never confused.
 """
 
 from __future__ import annotations
@@ -150,8 +151,13 @@ class CodePane:
             return
         if expansion.source == SOURCE_GRAPH:
             text = "call graph: code-review-graph DB"
+            if expansion.file_scope:
+                text = f"{text} (file scope)"
         elif expansion.source == SOURCE_SCAN:
-            text = "call graph: static scan of " + (", ".join(expansion.scanned) or "-")
+            if expansion.scanned:
+                text = "call graph: static scan of " + ", ".join(expansion.scanned)
+            else:
+                text = "call graph: static scan (no readable file)"
         elif expansion.source == SOURCE_NO_TREE:
             text = "call graph: no source tree (set ODIN3_ROOT or the codeRoot setting)"
         else:

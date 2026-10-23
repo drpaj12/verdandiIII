@@ -13,8 +13,13 @@ per level. Two sources, in order:
    finds the function spans, and a call-site scan of the body (an identifier followed by ``(``)
    names the callees, which are resolved against the same file's definitions only.
 
-The expansion names the source it used so the pane can say so; nothing here writes the
-checkout.
+A record that names no function but covers whole functions (a pass's whole-file record) seeds
+every function of its file, and the expansion says so: the database note reads "file scope".
+An unreadable file is never named as scanned.
+
+The expansion names the source it used so the pane can say so. The database is opened
+read-only, so ``graph.db`` and its ``-wal`` are never written; SQLite may create or touch the
+``graph.db-shm`` shared-memory file beside it as read-side bookkeeping.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
-from verdandi.odin3.locator import Locator
+from verdandi.odin3.locator import Locator, _skip_comment, _skip_literal
 from verdandi.trace import CodeRef
 
 MAX_DEPTH = 5
@@ -60,16 +65,21 @@ class Span:
 
 @dataclass(frozen=True)
 class Expansion:
-    """The spans the pane shows and where the call graph came from."""
+    """The spans the pane shows and where the call graph came from.
+
+    ``file_scope`` is True when a record covered no single function and the expansion seeded
+    every function of its file, which the pane's source note repeats.
+    """
 
     spans: tuple[Span, ...]
     source: str
     scanned: tuple[str, ...] = ()
+    file_scope: bool = False
 
 
 def expand(root: Path | None, refs: list[CodeRef], depth: int) -> Expansion:
     """The step's refs at depth 0 plus callee bodies to ``depth``, with the source used."""
-    seeds = tuple(Span(ref.file, ref.line, ref.end_line, ref.function, 0) for ref in refs)
+    seeds = _seed_spans(root, refs)
     if depth <= 0 or not seeds:
         return Expansion(seeds, SOURCE_NONE)
     if root is None or not root.is_dir():
@@ -82,22 +92,53 @@ def expand(root: Path | None, refs: list[CodeRef], depth: int) -> Expansion:
         except (sqlite3.Error, OSError):
             extra = None
         if extra is not None:
-            return Expansion(seeds + tuple(extra), SOURCE_GRAPH)
-    extra, scanned = _scan_callees(root, refs, depth)
-    return Expansion(seeds + tuple(extra), SOURCE_SCAN, tuple(scanned))
+            spans, file_scope = extra
+            return Expansion(seeds + tuple(spans), SOURCE_GRAPH, file_scope=file_scope)
+    extra_spans, scanned = _scan_callees(root, refs, depth)
+    return Expansion(seeds + tuple(extra_spans), SOURCE_SCAN, tuple(scanned))
+
+
+def _seed_spans(root: Path | None, refs: list[CodeRef]) -> tuple[Span, ...]:
+    """The refs' spans; a record naming a function takes that function's located body.
+
+    A rule event's record names its function but spans the one line of the log call; depth 0
+    shows the function body D8 describes, so the record is widened to the definition the
+    section-6 scan locates. Without a source tree, or without a located definition, the
+    record's own span stays.
+    """
+    locator = Locator(root) if root is not None else None
+    definitions: dict[str, list[CodeRef]] = {}
+    spans: list[Span] = []
+    for ref in refs:
+        span = Span(ref.file, ref.line, ref.end_line, ref.function, 0)
+        if locator is not None and ref.function is not None:
+            if ref.file not in definitions:
+                definitions[ref.file] = locator.functions(Path(ref.file))
+            found = next(
+                (item for item in definitions[ref.file] if item.function == ref.function), None
+            )
+            if found is not None:
+                span = Span(ref.file, found.line, found.end_line, ref.function, 0)
+        spans.append(span)
+    return tuple(spans)
 
 
 def _connect(database: Path) -> sqlite3.Connection:
+    """A read-only connection; SQLite may still touch graph.db-shm for WAL bookkeeping."""
     return sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True, timeout=2.0)
 
 
 def _graph_callees(
     root: Path, database: Path, refs: list[CodeRef], depth: int
-) -> list[Span] | None:
-    """The callee spans the database gives; None when the database is not readable as a graph."""
+) -> tuple[list[Span], bool] | None:
+    """The callee spans the database gives and whether a file scope seeded them.
+
+    None when the database is not readable as a graph.
+    """
     with closing(_connect(database)) as connection:
         connection.execute("SELECT 1 FROM nodes LIMIT 1").fetchall()
-        queue = deque(_seed_rows(connection, root, refs))
+        seeds, file_scope = _seed_rows(connection, root, refs)
+        queue = deque(seeds)
         seen = set(queue)
         spans: list[Span] = []
         for level in range(1, depth + 1):
@@ -111,12 +152,20 @@ def _graph_callees(
                     spans.append(
                         Span(span.file, span.line, span.end_line, span.function, level)
                     )
-    return spans
+    return spans, file_scope
 
 
-def _seed_rows(connection: sqlite3.Connection, root: Path, refs: list[CodeRef]) -> list[str]:
-    """The qualified names of the refs' functions, resolved by name or by line."""
+def _seed_rows(
+    connection: sqlite3.Connection, root: Path, refs: list[CodeRef]
+) -> tuple[list[str], bool]:
+    """The qualified names of the refs' functions, resolved by name or by record span.
+
+    A record without a function seeds every function its span intersects, so a whole-file
+    record reaches all of its file's functions. When the span meets no function, the whole
+    file's functions seed the expansion instead, and the returned flag says so.
+    """
     found: list[str] = []
+    file_scope = False
     for ref in refs:
         path = str(root / ref.file)
         if ref.function is not None:
@@ -126,17 +175,31 @@ def _seed_rows(connection: sqlite3.Connection, root: Path, refs: list[CodeRef]) 
                 " ORDER BY (file_path = ?) DESC, qualified_name LIMIT 1",
                 (ref.function, path, _like_suffix(ref.file), path),
             ).fetchone()
-        else:
-            row = connection.execute(
+            if row is not None and row[0] not in found:
+                found.append(str(row[0]))
+            continue
+        rows = connection.execute(
+            "SELECT qualified_name FROM nodes WHERE kind = 'Function'"
+            " AND (file_path = ? OR file_path LIKE ? ESCAPE '\\')"
+            " AND line_start <= ? AND line_end >= ?"
+            " ORDER BY (file_path = ?) DESC, line_start",
+            (path, _like_suffix(ref.file), ref.end_line, ref.line, path),
+        ).fetchall()
+        if not rows:
+            rows = connection.execute(
                 "SELECT qualified_name FROM nodes WHERE kind = 'Function'"
                 " AND (file_path = ? OR file_path LIKE ? ESCAPE '\\')"
-                " AND line_start <= ? AND line_end >= ?"
-                " ORDER BY (file_path = ?) DESC, line_start DESC LIMIT 1",
-                (path, _like_suffix(ref.file), ref.line, ref.line, path),
-            ).fetchone()
-        if row is not None and row[0] not in found:
-            found.append(str(row[0]))
-    return found
+                " ORDER BY (file_path = ?) DESC, line_start",
+                (path, _like_suffix(ref.file), path),
+            ).fetchall()
+            if rows:
+                file_scope = True
+        elif len(rows) > 1:
+            file_scope = True
+        for row in rows:
+            if row[0] not in found:
+                found.append(str(row[0]))
+    return found, file_scope
 
 
 def _callee_rows(
@@ -241,25 +304,40 @@ def _scan_callees(
 
     queue: deque[tuple[CodeRef, int]] = deque()
     seen: set[tuple[str, str, int]] = set()
-    for ref in refs:
-        definition = _definition_of(spans_of(ref.file), ref)
-        seed = definition if definition is not None else ref
-        key = (seed.file, seed.function or "", seed.line)
+
+    def push(definition: CodeRef) -> None:
+        key = (definition.file, definition.function or "", definition.line)
         if key not in seen:
             seen.add(key)
-            queue.append((seed, 0))
+            queue.append((definition, 0))
+
+    for ref in refs:
+        file_definitions = spans_of(ref.file)
+        if ref.function is not None:
+            push(_definition_of(file_definitions, ref) or ref)
+            continue
+        intersecting = [
+            span
+            for span in file_definitions
+            if span.line <= ref.end_line and span.end_line >= ref.line
+        ]
+        if intersecting or file_definitions:
+            for span in intersecting or file_definitions:
+                push(span)
+        else:
+            push(ref)
     spans: list[Span] = []
     scanned: list[str] = []
     while queue:
         definition, level = queue.popleft()
         if level >= depth:
             continue
-        if definition.file not in scanned:
-            scanned.append(definition.file)
         lines = lines_of(definition.file)
         if lines is None:
             continue
-        body = "\n".join(lines[definition.line - 1 : definition.end_line])
+        if definition.file not in scanned:
+            scanned.append(definition.file)
+        body = _code_only("\n".join(lines[definition.line - 1 : definition.end_line]))
         for name in _CALL.findall(body):
             if name in _NOT_CALLS:
                 continue
@@ -277,6 +355,28 @@ def _scan_callees(
             )
             queue.append((target, level + 1))
     return spans, scanned
+
+
+def _code_only(text: str) -> str:
+    """``text`` with C comments and string or character literals replaced by spaces.
+
+    A call name in a comment or a format string is no call; the Locator's scanners define
+    where a comment or a literal ends.
+    """
+    parts: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "/" and text.startswith(("/*", "//"), index):
+            index = _skip_comment(text, index)
+        elif char in "\"'":
+            index = _skip_literal(text, index)
+        else:
+            parts.append(char)
+            index += 1
+            continue
+        parts.append(" ")
+    return "".join(parts)
 
 
 def _definition_of(spans: list[CodeRef], ref: CodeRef) -> CodeRef | None:

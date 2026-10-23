@@ -485,6 +485,59 @@ class PaneTest(unittest.TestCase):
             [span.function for span in pane.shown_spans()], ["top", "mid"]
         )
 
+    def test_code_depth_file_scope_note(self) -> None:
+        """A pass record covers the file; the note says the database ran at file scope."""
+        from tests.test_callgraph import graph_nodes, make_graph_db
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            source = root / "src" / "a.c"
+            source.parent.mkdir(parents=True)
+            source.write_text(CALL_SOURCE, encoding="utf-8")
+            path = str(root / "src" / "a.c")
+            other = str(root / "src" / "b.c")
+            make_graph_db(
+                root,
+                [*graph_nodes(root), ("Function", "ext", f"{other}::ext", other, 20, 22)],
+                [("CALLS", f"{path}::mid", f"{other}::ext")],
+            )
+            step = Step(
+                id="s0001",
+                parent=None,
+                level=1,
+                title="proc",
+                anchor="pass:proc",
+                code=[CodeRef(file="src/a.c", line=1, end_line=12, function=None)],
+            )
+            trace = Trace(Path(tmp) / "trace", make_manifest(), [step])
+            pane = CodePane(root=root)
+            pane.show(step, trace)
+            pane.depth_box.setValue(1)
+        self.assertEqual(pane.note.text(), "call graph: code-review-graph DB (file scope)")
+        self.assertEqual([span.function for span in pane.shown_spans()], [None, "ext"])
+
+    def test_code_depth_names_an_unreadable_file(self) -> None:
+        """No readable step file: the note says the scan had nothing to read."""
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            root.mkdir()
+            step = Step(
+                id="s0001",
+                parent=None,
+                level=1,
+                title="opt",
+                anchor="pass:opt",
+                code=[CodeRef(file="src/gone.c", line=1, end_line=3, function="top")],
+            )
+            trace = Trace(Path(tmp) / "trace", make_manifest(), [step])
+            pane = CodePane(root=root)
+            pane.show(step, trace)
+            pane.depth_box.setValue(1)
+        self.assertEqual(pane.note.text(), "call graph: static scan (no readable file)")
+
     def test_code_depth_without_a_source_tree(self) -> None:
         """The depth control exists and says so when there is no ODIN3_ROOT to read."""
         from PySide6.QtWidgets import QPlainTextEdit

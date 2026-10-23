@@ -32,6 +32,17 @@ int top(int y) {
 }
 """
 
+COMMENTED = """int helper(int x) {
+    return x;
+}
+
+int top(int y) {
+    /* helper(1) */
+    const char *s = "helper(2)";
+    return 0;
+}
+"""
+
 TOP = CodeRef(file="src/a.c", line=9, end_line=13, function="top")
 MID = CodeRef(file="src/a.c", line=5, end_line=7, function="mid")
 LEAF = CodeRef(file="src/a.c", line=1, end_line=3, function="leaf")
@@ -138,6 +149,40 @@ class StaticScanTest(unittest.TestCase):
             [(span.function, span.depth) for span in result.spans],
             [(None, 0), ("mid", 1)],
         )
+
+    def test_calls_inside_comments_and_strings_are_not_followed(self) -> None:
+        """A call name in a comment or a format string is no call."""
+        ref = CodeRef(file="src/a.c", line=5, end_line=9, function="top")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root, COMMENTED)
+            result = expand(root, [ref], 1)
+        self.assertEqual(result.source, SOURCE_SCAN)
+        self.assertEqual(
+            [(span.function, span.depth) for span in result.spans], [("top", 0)]
+        )
+
+    def test_a_whole_file_ref_seeds_every_function_of_the_file(self) -> None:
+        """A pass record covers the file; every definition is scanned, nothing escapes it."""
+        ref = CodeRef(file="src/a.c", line=1, end_line=14, function=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root, "/* file header */\n" + SOURCE)
+            result = expand(root, [ref], 2)
+        self.assertEqual(result.source, SOURCE_SCAN)
+        self.assertEqual(result.scanned, ("src/a.c",))
+        self.assertEqual(
+            [(span.function, span.depth) for span in result.spans], [(None, 0)]
+        )
+
+    def test_unreadable_file_is_not_named_as_scanned(self) -> None:
+        """A step file that cannot be read is no source the scan used."""
+        ref = CodeRef(file="src/gone.c", line=1, end_line=3, function="top")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = expand(root, [ref], 1)
+        self.assertEqual(result.source, SOURCE_SCAN)
+        self.assertEqual(result.scanned, ())
 
 
 class GraphDatabaseTest(unittest.TestCase):
@@ -289,9 +334,85 @@ class GraphDatabaseTest(unittest.TestCase):
             )
             ref = CodeRef(file="src/a.c", line=10, end_line=10, function=None)
             result = expand(root, [ref], 1)
+        self.assertFalse(result.file_scope)
         self.assertEqual(
             [(span.function, span.depth) for span in result.spans],
             [(None, 0), ("mid", 1)],
+        )
+
+    def whole_file_graph(self, root: Path) -> None:
+        """a.c's three functions plus b.c's ext, which mid calls across files."""
+        write_source(root, "")
+        path = str(root / "src" / "a.c")
+        other = str(root / "src" / "b.c")
+        nodes = [*graph_nodes(root), ("Function", "ext", f"{other}::ext", other, 20, 22)]
+        make_graph_db(
+            root,
+            nodes,
+            [
+                ("CALLS", f"{path}::top", f"{path}::mid"),
+                ("CALLS", f"{path}::mid", f"{other}::ext"),
+            ],
+        )
+
+    def test_whole_file_ref_seeds_every_function_from_the_database(self) -> None:
+        """A pass record's file scope reaches all of its file's functions, and says so."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.whole_file_graph(root)
+            ref = CodeRef(file="src/a.c", line=1, end_line=13, function=None)
+            result = expand(root, [ref], 1)
+        self.assertEqual(result.source, SOURCE_GRAPH)
+        self.assertTrue(result.file_scope)
+        self.assertEqual(
+            [(span.function, span.depth) for span in result.spans],
+            [(None, 0), ("ext", 1)],
+        )
+
+    def test_ref_outside_every_function_seeds_the_whole_file(self) -> None:
+        """A one-line record between functions meets no definition, so the file seeds."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.whole_file_graph(root)
+            ref = CodeRef(file="src/a.c", line=4, end_line=4, function=None)
+            result = expand(root, [ref], 1)
+        self.assertEqual(result.source, SOURCE_GRAPH)
+        self.assertTrue(result.file_scope)
+        self.assertEqual(
+            [(span.function, span.depth) for span in result.spans],
+            [(None, 0), ("ext", 1)],
+        )
+
+
+class DepthZeroTest(unittest.TestCase):
+    def test_a_named_record_is_widened_to_its_definition(self) -> None:
+        """A rule record spans its log line; depth 0 shows the function body."""
+        ref = CodeRef(file="src/a.c", line=10, end_line=10, function="top")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root)
+            result = expand(root, [ref], 0)
+        self.assertEqual(result.source, SOURCE_NONE)
+        self.assertEqual(
+            [(span.line, span.end_line, span.function) for span in result.spans],
+            [(9, 13, "top")],
+        )
+
+    def test_without_a_source_tree_the_record_span_stays(self) -> None:
+        ref = CodeRef(file="src/a.c", line=10, end_line=10, function="top")
+        result = expand(None, [ref], 0)
+        self.assertEqual(
+            [(span.line, span.end_line) for span in result.spans], [(10, 10)]
+        )
+
+    def test_a_whole_file_record_keeps_its_span(self) -> None:
+        ref = CodeRef(file="src/a.c", line=1, end_line=13, function=None)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root)
+            result = expand(root, [ref], 0)
+        self.assertEqual(
+            [(span.line, span.end_line) for span in result.spans], [(1, 13)]
         )
 
 

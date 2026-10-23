@@ -180,6 +180,50 @@ class GraphDatabaseTest(unittest.TestCase):
             [span.function for span in result.spans], ["top", "mid", "leaf"]
         )
 
+    def test_ambiguous_bare_name_is_skipped(self) -> None:
+        """Two files define ``leaf``; a caller in a third file has no single answer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root, "")
+            path = str(root / "src" / "a.c")
+            other = str(root / "src" / "b.c")
+            third = str(root / "src" / "c.c")
+            nodes = [
+                ("Function", "top", f"{path}::top", path, 9, 13),
+                ("Function", "mid", f"{path}::mid", path, 5, 7),
+                ("Function", "leaf", f"{other}::leaf", other, 20, 22),
+                ("Function", "leaf", f"{third}::leaf", third, 20, 22),
+            ]
+            make_graph_db(
+                root,
+                nodes,
+                [("CALLS", f"{path}::top", "leaf")],
+            )
+            result = expand(root, [TOP], 1)
+        self.assertEqual([span.function for span in result.spans], ["top"])
+
+    def test_bare_name_prefers_the_caller_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root, "")
+            path = str(root / "src" / "a.c")
+            other = str(root / "src" / "b.c")
+            nodes = [
+                *graph_nodes(root),
+                ("Function", "shared", f"{other}::shared", other, 20, 22),
+                ("Function", "shared", f"{path}::shared", path, 20, 22),
+            ]
+            make_graph_db(
+                root,
+                nodes,
+                [("CALLS", f"{path}::top", "shared")],
+            )
+            result = expand(root, [TOP], 1)
+        self.assertEqual(
+            [(span.function, span.file) for span in result.spans[1:]],
+            [("shared", "src/a.c")],
+        )
+
     def test_graph_callee_outside_the_tree_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

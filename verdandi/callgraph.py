@@ -103,8 +103,7 @@ def _graph_callees(
         for level in range(1, depth + 1):
             for _ in range(len(queue)):
                 qualified = queue.popleft()
-                for row in _callee_rows(connection, qualified, root):
-                    target, span = row
+                for target, span in _callee_rows(connection, qualified, root):
                     if target in seen:
                         continue
                     seen.add(target)
@@ -143,7 +142,16 @@ def _seed_rows(connection: sqlite3.Connection, root: Path, refs: list[CodeRef]) 
 def _callee_rows(
     connection: sqlite3.Connection, qualified: str, root: Path
 ) -> list[tuple[str, Span]]:
-    """The function nodes the CALLS edges of ``qualified`` reach, inside the source tree."""
+    """The function nodes the CALLS edges of ``qualified`` reach, inside the source tree.
+
+    A qualified target names one node. A bare target (the graph's unresolved form) is resolved
+    by function name: the caller's own file wins, else the name must be unique in the tree, as
+    a wrong body would be worse than no callee.
+    """
+    caller = connection.execute(
+        "SELECT file_path FROM nodes WHERE qualified_name = ?", (qualified,)
+    ).fetchone()
+    caller_file = "" if caller is None else str(caller[0])
     targets = [
         str(row[0])
         for row in connection.execute(
@@ -163,10 +171,10 @@ def _callee_rows(
         else:
             rows = connection.execute(
                 "SELECT qualified_name, name, file_path, line_start, line_end FROM nodes"
-                " WHERE kind = 'Function' AND name = ?"
-                " ORDER BY (file_path = ?) DESC, file_path, line_start LIMIT 1",
-                (target, str(root)),
+                " WHERE kind = 'Function' AND name = ?",
+                (target,),
             ).fetchall()
+            rows = _unambiguous(rows, caller_file, root)
         for row in rows:
             relative = _relative(root, str(row[2]))
             if relative is None or row[3] is None or row[4] is None:
@@ -178,6 +186,17 @@ def _callee_rows(
                 )
             )
     return found
+
+
+def _unambiguous(
+    rows: list[tuple[object, ...]], caller_file: str, root: Path
+) -> list[tuple[object, ...]]:
+    """Bare-name candidates: the caller's file's definition, else the only one in the tree."""
+    in_tree = [row for row in rows if _relative(root, str(row[2])) is not None]
+    same_file = [row for row in in_tree if str(row[2]) == caller_file]
+    if same_file:
+        return same_file[:1]
+    return in_tree if len(in_tree) == 1 else []
 
 
 def _relative(root: Path, file_path: str) -> str | None:

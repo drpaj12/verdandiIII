@@ -13,6 +13,7 @@ from unittest import mock
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from tests.test_navigator import make_manifest
+from verdandi.provenance import Loc
 from verdandi.trace import CodeRef, Diff, ObjRef, Step, Trace, load, save
 
 HAVE_QT = importlib.util.find_spec("PySide6") is not None
@@ -584,6 +585,65 @@ class PaneTest(unittest.TestCase):
             assert isinstance(widget, QPlainTextEdit)
             self.assertIn("int mid(int y) {", widget.toPlainText())
             self.assertEqual(widget.extraSelections(), [])
+
+    def test_code_open_example_at_line(self) -> None:
+        """D6: an example loc opens the trace's source copy, highlighted and centred."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace")
+            pane = CodePane()
+            pane.open_example(Loc("examples/crlf.v", 2, 2), trace.directory / "src")
+            self.assertEqual(pane.tabs.count(), 1)
+            self.assertEqual(pane.tabs.tabText(0), "crlf.v")
+            editor = pane.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("wire alpha;", editor.toPlainText())
+            self.assertEqual(len(editor.extraSelections()), 1)
+            self.assertEqual(editor.textCursor().blockNumber(), 1)
+
+    def test_code_open_example_missing_source(self) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace")
+            pane = CodePane()
+            pane.open_example(Loc("examples/gone.v", 3, 3), trace.directory / "src")
+            editor = pane.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("source not available: examples/gone.v", editor.toPlainText())
+
+    def test_code_example_tab_survives_a_step_change(self) -> None:
+        """An example tab sits beside the step tabs and is not cleared by the next step."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace")
+            second = Step(
+                id="s0002",
+                parent=None,
+                level=1,
+                title="opt",
+                anchor="pass:opt",
+                snapshot="s0001.json",
+                diff=trace.steps[0].diff,
+            )
+            trace = Trace(trace.directory, trace.manifest, [trace.steps[0], second])
+            pane = CodePane()
+            pane.show(trace.steps[0], trace)
+            pane.open_example(Loc("examples/crlf.v", 2, 2), trace.directory / "src")
+            self.assertEqual(pane.tabs.count(), 1)
+            pane.show(second, trace)
+            self.assertEqual(pane.tabs.count(), 1)
+            editor = pane.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("wire alpha;", editor.toPlainText())
 
     def test_data_filters_touched(self) -> None:
         from verdandi.gui.datapane import DataPane

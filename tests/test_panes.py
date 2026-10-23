@@ -747,6 +747,11 @@ class PaneTest(unittest.TestCase):
         from verdandi.gui.codepane import CodePane
 
         with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            step_source = root / "src" / "a.c"
+            step_source.parent.mkdir(parents=True)
+            step_source.write_text("int a;\nint b;\n", encoding="utf-8")
+            code = [CodeRef(file="src/a.c", line=1, end_line=1, function="a")]
             trace = highlight_trace(Path(tmp) / "trace")
             second = Step(
                 id="s0002",
@@ -756,15 +761,21 @@ class PaneTest(unittest.TestCase):
                 anchor="pass:opt",
                 snapshot="s0001.json",
                 diff=trace.steps[0].diff,
+                code=code,
             )
-            trace = Trace(trace.directory, trace.manifest, [trace.steps[0], second])
-            pane = CodePane()
-            pane.show(trace.steps[0], trace)
+            first = trace.steps[0]
+            first.code = code
+            trace = Trace(trace.directory, trace.manifest, [first, second])
+            pane = CodePane(root=root)
+            pane.show(first, trace)
+            self.assertEqual(pane.tabs.count(), 1)
             pane.open_example(Loc("examples/crlf.v", 2, 2), trace.directory / "src")
-            self.assertEqual(pane.tabs.count(), 1)
+            self.assertEqual(pane.tabs.count(), 2)
+            self.assertEqual(pane.tabs.tabText(1), "crlf.v")
             pane.show(second, trace)
-            self.assertEqual(pane.tabs.count(), 1)
-            editor = pane.tabs.widget(0)
+            self.assertEqual(pane.tabs.count(), 2)
+            self.assertEqual(pane.tabs.tabText(0), "a")
+            editor = pane.tabs.widget(1)
             assert isinstance(editor, QPlainTextEdit)
             self.assertIn("wire alpha;", editor.toPlainText())
 
@@ -1334,6 +1345,26 @@ class PaneTest(unittest.TestCase):
             self.assertIsInstance(widget, QPlainTextEdit)
             assert isinstance(widget, QPlainTextEdit)
             self.assertIn("int two;", widget.toPlainText())
+
+    def test_mainwindow_click_opens_the_example_line(self) -> None:
+        """D6: a Data pane row click opens the example source at its line in the Code pane."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.mainwindow import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            window = MainWindow(trace)
+            self.addCleanup(window.close)
+            self.assertIsNotNone(window.data_pane.on_source_clicked)
+            window.data_pane.node_table.cellClicked.emit(0, 0)
+            code = window.code_pane
+            self.assertEqual(code.tabs.count(), 1)
+            self.assertEqual(code.tabs.tabText(0), "prov.v")
+            editor = code.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("reg clk;", editor.toPlainText())
+            self.assertEqual(editor.textCursor().blockNumber(), 1)
 
     def test_explain_fallback_order(self) -> None:
         from verdandi.gui.explainpane import ExplainPane

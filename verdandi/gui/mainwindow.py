@@ -29,6 +29,7 @@ from verdandi.gui.explainpane import ExplainPane
 from verdandi.gui.sourcetree import SourcePane
 from verdandi.gui.verilogpane import VerilogPane
 from verdandi.navigator import Navigator
+from verdandi.provenance import Loc
 from verdandi.trace import Step, Trace
 
 PANE_NAMES = ("Verilog", "Code", "Data", "Explanation", "Diff", "Source")
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self.panes: dict[str, Pane] = {}
         self.code_pane: CodePane
         self.source_pane: SourcePane
+        self.data_pane: DataPane
         self.matches: list[Step] = []
         self.match_index = 0
         self.match_name = ""
@@ -158,10 +160,12 @@ class MainWindow(QMainWindow):
         self.code_pane = CodePane(root=self.code_root)
         self.source_pane = SourcePane(root=self.code_root)
         self.source_pane.tree.itemClicked.connect(self._open_source)
+        self.data_pane = DataPane()
+        self.data_pane.on_source_clicked = self._open_example_source
         panes: tuple[Pane, ...] = (
             VerilogPane(),
             self.code_pane,
-            DataPane(),
+            self.data_pane,
             ExplainPane(),
             DiffStrip(),
             self.source_pane,
@@ -179,6 +183,10 @@ class MainWindow(QMainWindow):
         file = self.source_pane.file_of(item)
         if file is not None:
             self.code_pane.open_file(file)
+
+    def _open_example_source(self, loc: Loc) -> None:
+        """A Data pane click opens the trace's example source at the loc's line (D6)."""
+        self.code_pane.open_example(loc, self.trace.directory / "src")
 
     def _build_menus(self) -> None:
         view_menu = self.menuBar().addMenu("View")

@@ -1,7 +1,7 @@
 anchor: pass:hardmap
 
-On the k6 architecture `hardmap` binds the arithmetic the target holds: the multiplier's
-`$mul` cell becomes a multiply block and the counter's adder becomes an adder chain. The L3
+On the k6 architecture `hardmap` binds the arithmetic the target holds: the recording's two
+`$mul` cells become multiply blocks and its two `$add` cells become adder chains. The L3
 event steps name each cell and its rule (`mapped to a multiply`, `mapped to an adder chain`).
 
 The register's logic and the reset multiplexers stay soft for ABC. Watch which cells the diff

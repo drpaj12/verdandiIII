@@ -57,6 +57,13 @@ VTR checkout, record with the LPM tech library instead; the first command is the
     verdandi record examples/playthrough/playthrough.v --top playthrough \
       --techlib "$ODIN3_ROOT/lib/lpm.o3lib" -o trace
 
+Five examples ship under `examples/`: `counter`, `register`, `multiplier` and `instantiation`
+(each records its module alone, with its own README and notes) and `playthrough`, the existing
+top that joins the counter, register and multiplier. The instantiation example shows a module
+used inside another: a parameterised counter instantiated twice at different widths plus a leaf
+gate module. `examples/record-all.sh` checks every example's notes with `verdandi check-notes`
+and records all five into `examples/<name>/trace`, smallest design first.
+
 With Odin III v1.0.0 and the k6 architecture the recording has 83 steps: 13 stages, 13 passes, 42
 sub-steps and 15 logged events. It exits 0. A pass that fails ends the recording with that step
 marked failed and its log kept, and exits 1; a usage or environment error exits 2.

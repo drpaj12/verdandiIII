@@ -12,6 +12,7 @@ from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from tests.helpers import HAVE_DOT
 from tests.test_navigator import make_manifest
 from verdandi.provenance import Loc
 from verdandi.trace import CodeRef, Diff, ObjRef, Step, Trace, load, save
@@ -950,6 +951,73 @@ class PaneTest(unittest.TestCase):
 
             click(20, 20)
             click(95, 95)
+        self.assertEqual(opened, [Loc("examples/prov.v", 2, 2)])
+
+    @unittest.skipUnless(HAVE_DOT, "Graphviz dot is not installed")
+    def test_click_and_hover_a_real_graphviz_node(self) -> None:
+        """D6/D5: a real dot SVG's translated, non-square picture maps clicks and hovers.
+
+        Graphviz wraps the drawing in a ``translate`` group and the renderer stretches the
+        picture into the widget, so the node's element bounds and the widget point differ in both
+        axes by more than a square, transform-free fixture shows.
+        """
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        from verdandi.graph import node_element_id
+        from verdandi.gui import datapane
+
+        element = node_element_id("m", 1)
+        dot_text = (
+            "digraph slice {\n"
+            f'  "m:1" [label="a", id="{element}"];\n'
+            '  "m:2" [label="b"];\n'
+            '  "m:3" [label="c"];\n'
+            '  "m:4" [label="d"];\n'
+            '  "m:1" -> "m:2";\n'
+            "}\n"
+        )
+        svg = datapane.render_dot(dot_text)
+        assert svg is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            with mock.patch.object(datapane, "render_dot", return_value=svg):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+            pane.graph.resize(300, 100)
+            pane.on_source_clicked = opened.append
+            self.assertTrue(pane.graph.hasMouseTracking())
+            box = pane.graph.renderer().viewBoxF()
+            rect = pane.graph.node_rect(element)
+            centre = QPointF(
+                (rect.center().x() - box.x()) * pane.graph.width() / box.width(),
+                (rect.center().y() - box.y()) * pane.graph.height() / box.height(),
+            )
+            corner = QPointF(1, 1)
+
+            def mouse(kind: QEvent.Type, point: QPointF, button: Qt.MouseButton) -> QMouseEvent:
+                return QMouseEvent(
+                    kind,
+                    point,
+                    point,
+                    button,
+                    button,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+
+            pane.graph.mouseMoveEvent(mouse(QEvent.Type.MouseMove, centre, Qt.MouseButton.NoButton))
+            self.assertEqual(pane.graph.toolTip(), "examples/prov.v:2")
+            pane.graph.mousePressEvent(
+                mouse(QEvent.Type.MouseButtonPress, centre, Qt.MouseButton.LeftButton)
+            )
+            pane.graph.mouseMoveEvent(
+                mouse(QEvent.Type.MouseMove, corner, Qt.MouseButton.NoButton)
+            )
+            self.assertEqual(pane.graph.toolTip(), "")
+            pane.graph.mousePressEvent(
+                mouse(QEvent.Type.MouseButtonPress, corner, Qt.MouseButton.LeftButton)
+            )
         self.assertEqual(opened, [Loc("examples/prov.v", 2, 2)])
 
     def test_net_name_toggle(self) -> None:

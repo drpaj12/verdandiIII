@@ -2,11 +2,15 @@
 
 Graphviz's SVG puts each node in a group with the ``id`` the dot text gives it (``verdandi.graph``
 names it ``vnd-<module>-<id>``), and Graphviz escapes the hyphens in the SVG source; Qt's SVG
-renderer resolves the decoded id, so ``boundsOnElement`` gives a node's viewBox rectangle. A
-left click is mapped from the widget's pixels into the viewBox (the SVG is fitted into the
-widget's rectangle, its aspect ratio kept, centred), tested against the rectangles of the nodes
-that carry a loc, and the smallest containing rectangle wins. A click on empty space reports
-nothing. The widget never draws its own badges: the dot text carries them.
+renderer resolves the decoded id, so ``boundsOnElement`` gives a node's rectangle in the
+element's own coordinates, and ``transformForElement`` carries it into the viewBox (Graphviz
+wraps the drawing in a ``translate`` group, so the two differ). A left click is mapped from the
+widget's pixels into the viewBox (the renderer paints with ``IgnoreAspectRatio``: the picture
+stretches to the widget's width and height, so x and y scale independently and there is no
+centring offset), tested against the rectangles of the nodes that carry a loc, and the smallest
+containing rectangle wins. A click on empty space reports nothing. Hovering a node sets the
+widget tooltip to that node's full provenance reference. The widget never draws its own badges:
+the dot text carries them.
 """
 
 from __future__ import annotations
@@ -27,15 +31,24 @@ class SvgGraph(QSvgWidget):
         super().__init__()
         self.targets: dict[str, Loc] = {}
         self.on_node_clicked: Callable[[Loc], None] | None = None
+        # Pin the painting the hit test maps from: the picture fills the widget's rectangle.
+        self.renderer().setAspectRatioMode(Qt.AspectRatioMode.IgnoreAspectRatio)
+        self.setMouseTracking(True)
 
     def set_graph(self, svg: QByteArray, targets: dict[str, Loc]) -> None:
         """Load one picture and the element-id -> loc hits a click can report."""
         self.targets = dict(targets)
+        self.setToolTip("")
         self.load(svg)
 
     def node_rect(self, element_id: str) -> QRectF:
         """The viewBox rectangle of one SVG element; empty when the picture lacks it."""
-        return self.renderer().boundsOnElement(element_id)
+        renderer = self.renderer()
+        if not renderer.elementExists(element_id):
+            return QRectF()
+        return renderer.transformForElement(element_id).mapRect(
+            renderer.boundsOnElement(element_id)
+        )
 
     def node_at(self, point: QPointF) -> Loc | None:
         """The loc of the smallest node rectangle containing a widget point; None on empty space."""
@@ -47,7 +60,7 @@ class SvgGraph(QSvgWidget):
         for element_id, loc in sorted(self.targets.items()):
             if not renderer.elementExists(element_id):
                 continue
-            rect = renderer.boundsOnElement(element_id)
+            rect = self.node_rect(element_id)
             if rect.contains(mapped):
                 inside.append((rect, loc))
         if not inside:
@@ -55,19 +68,24 @@ class SvgGraph(QSvgWidget):
         return min(inside, key=lambda pair: pair[0].width() * pair[0].height())[1]
 
     def _svg_point(self, point: QPointF) -> QPointF | None:
-        """A widget point in viewBox coordinates; None without a drawable picture."""
+        """A widget point in viewBox coordinates; None without a drawable picture.
+
+        The renderer paints with IgnoreAspectRatio, so each axis stretches independently and no
+        centring offset applies.
+        """
         box = self.renderer().viewBoxF()
         if box.width() <= 0 or box.height() <= 0 or self.width() <= 0 or self.height() <= 0:
             return None
-        scale = min(self.width() / box.width(), self.height() / box.height())
-        if scale <= 0:
-            return None
-        offset_x = (self.width() - box.width() * scale) / 2
-        offset_y = (self.height() - box.height() * scale) / 2
         return QPointF(
-            (point.x() - offset_x) / scale + box.x(),
-            (point.y() - offset_y) / scale + box.y(),
+            box.x() + point.x() * box.width() / self.width(),
+            box.y() + point.y() * box.height() / self.height(),
         )
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        """Hovering a node's rectangle offers its full provenance reference as a tooltip."""
+        loc = self.node_at(event.position())
+        self.setToolTip("" if loc is None else loc.reference)
+        super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

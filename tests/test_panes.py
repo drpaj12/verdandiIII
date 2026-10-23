@@ -424,6 +424,53 @@ class PaneTest(unittest.TestCase):
                 self.assertNotIn('label="q"', dot_texts[-1])
         self.assertEqual(len(dot_texts), 2)
 
+    def test_diff_strip_still_renders(self) -> None:
+        """The +/- log stays, beside the graph's colour diff: counts and the touched list."""
+        from verdandi.gui.diffstrip import DiffStrip
+
+        step = Step(
+            id="s0001",
+            parent=None,
+            level=1,
+            title="opt",
+            anchor="pass:opt",
+            diff=Diff(
+                added=[ObjRef("m", "node", 1, "a")],
+                removed=[ObjRef("m", "net", 20, "q")],
+                changed=[ObjRef("m", "node", 2, "b")],
+                by_name=False,
+            ),
+        )
+        trace = Trace(Path("/tmp/claude-1000/v2-diffstrip"), make_manifest(), [step])
+        strip = DiffStrip()
+        strip.show(step, trace)
+        self.assertEqual(strip.labels["added"].text(), "+1 added")
+        self.assertEqual(strip.labels["removed"].text(), "-1 removed")
+        self.assertEqual(strip.labels["changed"].text(), "~1 changed")
+        self.assertEqual(strip.refs.count(), 3)
+        self.assertEqual(
+            [strip.refs.item(row).text() for row in range(3)],
+            ["+ node m.a", "- net m.q", "~ node m.b"],
+        )
+
+    def test_diff_colours_on_the_graph(self) -> None:
+        """D4: the step diff is drawn on the graph, not only in the +/- log."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        dot_texts: list[str] = []
+
+        def capture(text: str) -> bytes:
+            dot_texts.append(text)
+            return svg
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = data_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "render_dot", side_effect=capture):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+        self.assertIn('color="#9a6700"', dot_texts[-1])
+
     def test_structure_badge_per_step_kind(self) -> None:
         """D3: the badge names the structure the pane shows; the symbol tab says so."""
         from verdandi.gui.datapane import DataPane

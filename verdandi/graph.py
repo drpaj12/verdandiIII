@@ -5,8 +5,12 @@ when one net connects them (any pin of the one to any pin of the other). The sli
 touched nodes plus ``rings`` rings of neighbours; only nets with both ends inside the slice become
 edges, so the picture shows the touched objects and their immediate wiring. Every edge carries
 its net's name as the label; an unnamed internal net is labelled ``net <id>``, and
-``show_net_names=False`` drops the labels. An unnamed node is labelled by its key. The Data pane
-renders this text with ``dot -Tsvg`` when Graphviz is installed.
+``show_net_names=False`` drops the labels. An unnamed node is labelled by its key.
+
+The step diff is drawn in colour (D4): an added node green, a changed node amber, a removed
+object (absent from the after snapshot, so it has no place in the graph) a dashed red node of its
+own; an added or changed net colours its edge. The Data pane renders this text with
+``dot -Tsvg`` when Graphviz is installed.
 """
 
 from __future__ import annotations
@@ -19,6 +23,19 @@ NodeKey = tuple[str, int]
 # Driver, sink, net name, net id.
 Edge = tuple[NodeKey, NodeKey, str, int]
 
+# Node attributes per diff class, in the diff strip's colours (green, red, amber).
+CLASS_STYLES = {
+    "added": 'color="#1a7f37", fillcolor="#dafbe1", penwidth=2, style="filled"',
+    "changed": 'color="#9a6700", fillcolor="#fff8c5", penwidth=2, style="filled"',
+    "removed": 'color="#cf222e", penwidth=2, style="dashed"',
+}
+
+# Edge attributes per diff class: colour only, as a fill on an edge has no meaning.
+EDGE_STYLES = {
+    "added": 'color="#1a7f37", penwidth=2',
+    "changed": 'color="#9a6700", penwidth=2',
+}
+
 
 def _quote(text: str) -> str:
     """A double-quoted dot string with backslashes and quotes escaped."""
@@ -28,6 +45,49 @@ def _quote(text: str) -> str:
 def net_label(net_name: str, net_id: int) -> str:
     """The edge label of a net: its name, else ``net <id>`` for an unnamed internal net."""
     return net_name or f"net {net_id}"
+
+
+def node_classes(diff: Diff) -> dict[NodeKey, str]:
+    """The diff's added and changed nodes as key -> class, for the after snapshot's nodes.
+
+    A removed node is not in the after snapshot, so it has no key here; it is drawn as its
+    own dashed node instead.
+    """
+    classes: dict[NodeKey, str] = {}
+    for name, refs in (("added", diff.added), ("changed", diff.changed)):
+        for ref in refs:
+            if ref.kind == "node":
+                classes[(ref.module, ref.id)] = name
+    return classes
+
+
+def net_classes(diff: Diff) -> dict[NodeKey, str]:
+    """The diff's added and changed nets as key -> class; a removed net is not drawn."""
+    classes: dict[NodeKey, str] = {}
+    for name, refs in (("added", diff.added), ("changed", diff.changed)):
+        for ref in refs:
+            if ref.kind == "net":
+                classes[(ref.module, ref.id)] = name
+    return classes
+
+
+def _removed_lines(diff: Diff) -> list[str]:
+    """The diff's removed objects as dashed red nodes, in key order.
+
+    A removed object is absent from the after snapshot, so it has no place in the wiring; a
+    node of its own still shows what the step removed.
+    """
+    found: list[tuple[str, str]] = []
+    for ref in diff.removed:
+        key = f"{ref.module}:{ref.kind}:{ref.id}"
+        if ref.kind == "node":
+            label = ref.name or f"{ref.module}:{ref.id}"
+        else:
+            label = f"{ref.kind} {ref.name}" if ref.name else f"{ref.kind} {ref.id}"
+        found.append(
+            (key, f"  {_quote(key)} [label={_quote(label)}, {CLASS_STYLES['removed']}];")
+        )
+    return [line for _, line in sorted(found)]
 
 
 def _module_parts(
@@ -107,18 +167,29 @@ def slice_dot(
         for key in touched:
             grown |= neighbours.get(key, set())
         touched = grown
+    classes = node_classes(diff)
+    classes_by_net = net_classes(diff)
     lines = ["digraph slice {"]
     for key in sorted(touched):
         label = names[key] or f"{key[0]}:{key[1]}"
-        lines.append(f"  {_quote(f'{key[0]}:{key[1]}')} [label={_quote(label)}];")
+        attributes = [f"label={_quote(label)}"]
+        kind = classes.get(key)
+        if kind is not None:
+            attributes.append(CLASS_STYLES[kind])
+        lines.append(f"  {_quote(f'{key[0]}:{key[1]}')} [{', '.join(attributes)}];")
+    lines.extend(_removed_lines(diff))
     for driver, sink, net_name, net_id in sorted(edges):
         if driver in touched and sink in touched:
-            attributes = (
-                f" [label={_quote(net_label(net_name, net_id))}]" if show_net_names else ""
-            )
+            attributes = []
+            if show_net_names:
+                attributes.append(f"label={_quote(net_label(net_name, net_id))}")
+            kind = classes_by_net.get((driver[0], net_id))
+            if kind is not None:
+                attributes.append(EDGE_STYLES[kind])
+            suffix = f" [{', '.join(attributes)}]" if attributes else ""
             lines.append(
                 f"  {_quote(f'{driver[0]}:{driver[1]}')} -> "
-                f"{_quote(f'{sink[0]}:{sink[1]}')}{attributes};"
+                f"{_quote(f'{sink[0]}:{sink[1]}')}{suffix};"
             )
     lines.append("}")
     return "\n".join(lines) + "\n"

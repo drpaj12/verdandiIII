@@ -94,10 +94,7 @@ class SourcePane:
         self.tree.scrollToItem(function if function is not None else item)
 
     def _zoom_ref(self, step: Step) -> CodeRef | None:
-        """The record the tree zooms to: the first one naming a function, else the first."""
-        with_function = next((ref for ref in step.code if ref.function is not None), None)
-        if with_function is not None:
-            return with_function
+        """The record the tree zooms to: the step's first code record."""
         return step.code[0] if step.code else None
 
     def _load(self, root: Path | None) -> None:

@@ -30,6 +30,6 @@ for entry in "${examples[@]}"; do
   read -r name top source <<<"$entry"
   echo "== $name"
   "$verdandi" check-notes --notes "$root/examples/$name/notes"
-  "$verdandi" record "$root/examples/$name/$source" --top "$top" \
+  "$verdandi" record "$root/examples/$source" --top "$top" \
     "${source_args[@]}" -o "$root/examples/$name/trace"
 done

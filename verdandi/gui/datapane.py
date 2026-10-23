@@ -125,6 +125,8 @@ class DataPane:
         self.net_table.setRowCount(0)
         self.ast_tree.clear()
         self._set_tabs(nodes=True, nets=True, ast=False, graph=False)
+        if self._step.picture is not None:
+            self._render_picture(self._step.picture)
         snapshot = self._trace.snapshot(self._step)
         if snapshot is None:
             return
@@ -135,8 +137,6 @@ class DataPane:
         elif kind == "ast":
             self._set_tabs(nodes=False, nets=False, ast=True, graph=False)
             self._fill_ast(snapshot)
-        if self._step.picture is not None:
-            self._render_picture(self._step.picture)
 
     def _set_tabs(self, *, nodes: bool, nets: bool, ast: bool, graph: bool) -> None:
         for page, visible in (

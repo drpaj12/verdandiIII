@@ -119,6 +119,32 @@ def data_trace(directory: Path) -> Trace:
     return load(directory)
 
 
+def picture_trace(directory: Path) -> Trace:
+    """An ABC step: a picture and no snapshot."""
+    dot = directory.parent / "abc.dot"
+    dot.write_text("digraph G { a -> b; }\n", encoding="utf-8")
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=2,
+            title="balance",
+            anchor="abc:balance",
+            diff=Diff(added=[], removed=[], changed=[], by_name=False),
+            picture="s0001.dot",
+        )
+    ]
+    save(
+        directory,
+        make_manifest(),
+        steps,
+        {},
+        [],
+        pictures={"s0001.dot": dot},
+    )
+    return load(directory)
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
 class PaneTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -188,6 +214,19 @@ class PaneTest(unittest.TestCase):
             self.assertEqual(item.text(), "1")
             pane.all_box.setChecked(True)
             self.assertEqual(pane.node_table.rowCount(), 2)
+
+    def test_data_picture_only_step(self) -> None:
+        """An ABC step has a picture and no snapshot; the picture must still render."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = picture_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "render_dot", return_value=svg):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+        self.assertTrue(pane.has_graph())
+        self.assertFalse(pane.tabs.isTabVisible(pane.tabs.indexOf(pane.node_table)))
 
     def test_explain_fallback_order(self) -> None:
         from verdandi.gui.explainpane import ExplainPane

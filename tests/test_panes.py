@@ -31,8 +31,11 @@ def write_sources(directory: Path) -> list[Path]:
     return [crlf, tab]
 
 
-def highlight_trace(directory: Path) -> Trace:
+def highlight_trace(directory: Path, span_paths: bool = False) -> Trace:
+    """A one-net-per-source trace; with ``span_paths`` the rows carry the read paths."""
     sources = write_sources(directory.parent)
+    crlf = str(directory.parent / "crlf.v") if span_paths else "crlf.v"
+    tab = str(directory.parent / "tab.v") if span_paths else "tab.v"
     snapshot = ir_snapshot(
         [
             {
@@ -44,14 +47,14 @@ def highlight_trace(directory: Path) -> Trace:
                         "name": "alpha",
                         "drivers": [],
                         "sinks": [],
-                        "sources": [["crlf.v", 2, 8, 2, 13]],
+                        "sources": [[crlf, 2, 8, 2, 13]],
                     },
                     {
                         "id": 11,
                         "name": "beta",
                         "drivers": [],
                         "sinks": [],
-                        "sources": [["tab.v", 2, 7, 2, 11]],
+                        "sources": [[tab, 2, 7, 2, 11]],
                     },
                 ],
                 "wires": [],
@@ -129,6 +132,16 @@ class PaneTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             trace = highlight_trace(Path(tmp) / "trace")
+            pane = VerilogPane()
+            pane.show(trace.steps[0], trace)
+            self.assertEqual(pane.highlighted_texts(), ["alpha", "beta"])
+
+    def test_highlight_span_paths(self) -> None:
+        """A real trace's span names the read_verilog path, not the tab's basename."""
+        from verdandi.gui.verilogpane import VerilogPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace", span_paths=True)
             pane = VerilogPane()
             pane.show(trace.steps[0], trace)
             self.assertEqual(pane.highlighted_texts(), ["alpha", "beta"])

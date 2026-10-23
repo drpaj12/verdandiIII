@@ -1,7 +1,9 @@
 """The Verilog pane: the trace's sources with the current step's object spans highlighted.
 
 A span is one snapshot source row ``[file, line, col, end_line, end_col]``: 1-based lines and
-columns, ``end_col`` one past the last character (the recorder's convention). Columns count
+columns, ``end_col`` one past the last character (the recorder's convention). ``file`` is the
+source as the recorder saw it, often the path given to ``read_verilog``; the pane's tabs are
+keyed by basename, so a span's exact name is tried first and its basename second. Columns count
 characters, so a tab is one character; one trailing ``\\r`` per line is dropped before slicing so
 a CRLF source highlights the same text as an LF one.
 """
@@ -143,6 +145,17 @@ class VerilogPane:
             self.tabs.addTab(editor, name)
             self.editors[name] = editor
 
+    def _target(self, name: str) -> tuple[str, QPlainTextEdit] | None:
+        """The tab key and editor for a span's file: exact name first, basename second."""
+        editor = self.editors.get(name)
+        if editor is not None:
+            return name, editor
+        base = Path(name).name
+        editor = self.editors.get(base)
+        if editor is None:
+            return None
+        return base, editor
+
     def _highlight(self, step: Step, trace: Trace) -> None:
         for editor in self.editors.values():
             editor.setExtraSelections([])
@@ -150,10 +163,10 @@ class VerilogPane:
         for span in source_spans(trace.snapshot(step), step.diff):
             if len(span) < 5:
                 continue
-            name = str(span[0])
-            target = self.editors.get(name)
-            if target is None:
+            found = self._target(str(span[0]))
+            if found is None:
                 continue
+            name, target = found
             offsets = span_offsets(target.toPlainText(), span)
             if offsets is None or offsets[1] <= offsets[0]:
                 continue

@@ -1,9 +1,13 @@
-"""The Code pane: the Odin III source at the current step's code locations.
+"""The Code pane: the Odin III source of the step's functions at a chosen call depth (D8).
 
-One read-only tab per ``CodeRef``. A file is read from ``ODIN3_ROOT`` (or the root given to the
-pane, which the entry point takes from the ``codeRoot`` app setting), the ``line..end_line``
-lines are highlighted and the view scrolls to the first one; a missing file shows ``source not
-available: <file>`` in its tab instead of raising.
+One read-only tab per file named by the step's ``CodeRef`` records, or at depth > 0 by their
+callees as well. A file is read from ``ODIN3_ROOT`` (or the root given to the pane, which the
+entry point takes from the ``codeRoot`` app setting); every function span shown is highlighted
+in its depth's colour and the view scrolls to the first one. A missing file shows
+``source not available: <file>`` in its tab instead of raising. The depth control follows the
+call graph of ``verdandi.callgraph``; a note beside it names the source that graph came from
+(the code-review-graph database, marked "file scope" when a record covered no single function,
+or a static scan), so the two are never confused.
 """
 
 from __future__ import annotations
@@ -11,13 +15,39 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QTextCursor
-from PySide6.QtWidgets import QPlainTextEdit, QTabWidget, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QSpinBox,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
+from verdandi.callgraph import (
+    MAX_DEPTH,
+    SOURCE_GRAPH,
+    SOURCE_NO_TREE,
+    SOURCE_SCAN,
+    Expansion,
+    Span,
+    expand,
+)
 from verdandi.gui.verilogpane import read_source
-from verdandi.trace import CodeRef, Step, Trace
+from verdandi.trace import Step, Trace
 
 HIGHLIGHT = QColor("#ddf4ff")
+CALLEE_HIGHLIGHTS = (
+    QColor("#e6f7ea"),
+    QColor("#fff4d6"),
+    QColor("#f0e8ff"),
+    QColor("#ffe8e8"),
+    QColor("#e8f2ff"),
+)
 
 
 def code_root(root: Path | None) -> Path | None:
@@ -32,41 +62,154 @@ def code_root(root: Path | None) -> Path | None:
     return None
 
 
+def depth_highlight(depth: int) -> QColor:
+    """The body colour of one depth: the step's own blue, then a callee's own shade."""
+    if depth == 0:
+        return HIGHLIGHT
+    return CALLEE_HIGHLIGHTS[(depth - 1) % len(CALLEE_HIGHLIGHTS)]
+
+
 class CodePane:
-    """The step's code locations as tabs; the function span of each is highlighted."""
+    """The step's code locations as file tabs; each shown function span is highlighted."""
 
     def __init__(self, root: Path | None = None) -> None:
         self.root = root
         self.widget = QWidget()
+        self.depth_box = QSpinBox()
+        self.depth_box.setObjectName("depth-control")
+        self.depth_box.setRange(0, MAX_DEPTH)
+        self.depth_box.setValue(0)
+        self.depth_box.setToolTip("how many rings of callees the pane follows")
+        self.depth_box.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.note = QLabel()
+        self.note.setObjectName("source-note")
+        self.note.setWordWrap(True)
+        self.note.setVisible(False)
+        controls = QWidget()
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.addWidget(QLabel("Depth:"))
+        controls_layout.addWidget(self.depth_box)
+        controls_layout.addStretch(1)
         self.tabs = QTabWidget()
         layout = QVBoxLayout(self.widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.tabs)
+        layout.addWidget(controls)
+        layout.addWidget(self.note)
+        layout.addWidget(self.tabs, 1)
+        self._step: Step | None = None
+        self._trace: Trace | None = None
+        self._spans: list[Span] = []
+        self._files: dict[str, QPlainTextEdit] = {}
+        self.depth_box.valueChanged.connect(self._rerender)
 
     def show(self, step: Step, trace: Trace) -> None:
-        self.tabs.clear()
-        root = code_root(self.root)
-        for ref in step.code:
-            self.tabs.addTab(self._editor(ref, root), ref.function or Path(ref.file).name)
+        self._step = step
+        self._trace = trace
+        self._render()
 
-    def _editor(self, ref: CodeRef, root: Path | None) -> QPlainTextEdit:
-        path = None if root is None else root / ref.file
+    def shown_spans(self) -> list[Span]:
+        """The function spans the pane currently shows, in depth order."""
+        return list(self._spans)
+
+    def open_file(self, file: str) -> None:
+        """Open one file of the source tree whole in its own tab (a source-tree click)."""
+        root = code_root(self.root)
+        editor = self._files.get(file)
+        if editor is None or self.tabs.indexOf(editor) < 0:
+            editor = self._whole_editor(file, root)
+            self.tabs.addTab(editor, Path(file).name)
+            self._files[file] = editor
+        self.tabs.setCurrentWidget(editor)
+
+    def _rerender(self, _value: int = 0) -> None:
+        if self._step is not None and self._trace is not None:
+            self._render()
+
+    def _render(self) -> None:
+        self.tabs.clear()
+        self._files = {}
+        if self._step is None:
+            return
+        root = code_root(self.root)
+        expansion = expand(root, self._step.code, self.depth_box.value())
+        self._spans = list(expansion.spans)
+        self._set_note(expansion, self.depth_box.value())
+        groups: dict[str, list[Span]] = {}
+        for span in expansion.spans:
+            groups.setdefault(span.file, []).append(span)
+        for file, spans in groups.items():
+            editor = self._editor(file, root, spans)
+            self.tabs.addTab(editor, self._title(file, spans))
+            self._files[file] = editor
+
+    def _set_note(self, expansion: Expansion, depth: int) -> None:
+        """Name the call-graph source in use; depth 0 needs no graph and shows no note."""
+        if depth <= 0 or not expansion.spans:
+            self.note.clear()
+            self.note.setVisible(False)
+            return
+        if expansion.source == SOURCE_GRAPH:
+            text = "call graph: code-review-graph DB"
+            if expansion.file_scope:
+                text = f"{text} (file scope)"
+        elif expansion.source == SOURCE_SCAN:
+            if expansion.scanned:
+                text = "call graph: static scan of " + ", ".join(expansion.scanned)
+            else:
+                text = "call graph: static scan (no readable file)"
+        elif expansion.source == SOURCE_NO_TREE:
+            text = "call graph: no source tree (set ODIN3_ROOT or the codeRoot setting)"
+        else:
+            text = f"call graph: {expansion.source}"
+        self.note.setText(text)
+        self.note.setVisible(True)
+
+    @staticmethod
+    def _title(file: str, spans: list[Span]) -> str:
+        if len(spans) == 1 and spans[0].function is not None:
+            return spans[0].function
+        return Path(file).name
+
+    def _editor(self, file: str, root: Path | None, spans: list[Span]) -> QPlainTextEdit:
+        path = None if root is None else root / file
         if path is None or not path.is_file():
-            editor = QPlainTextEdit(f"source not available: {ref.file}")
+            editor = QPlainTextEdit(f"source not available: {file}")
             editor.setReadOnly(True)
             return editor
         editor = QPlainTextEdit(read_source(path))
         editor.setReadOnly(True)
         editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self._highlight_lines(editor, ref.line, ref.end_line)
+        first = True
+        for span in spans:
+            shown = self._highlight_span(
+                editor, span.line, span.end_line, depth_highlight(span.depth)
+            )
+            if shown and first:
+                self._scroll_to(editor, span.line)
+                first = False
         return editor
 
-    def _highlight_lines(self, editor: QPlainTextEdit, line: int, end_line: int) -> None:
+    def _whole_editor(self, file: str, root: Path | None) -> QPlainTextEdit:
+        path = None if root is None else root / file
+        if path is None or not path.is_file():
+            editor = QPlainTextEdit(f"source not available: {file}")
+            editor.setReadOnly(True)
+            return editor
+        editor = QPlainTextEdit(read_source(path))
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        return editor
+
+    def _highlight_span(
+        self, editor: QPlainTextEdit, line: int, end_line: int, colour: QColor
+    ) -> bool:
+        """Highlight one span; False when it names no line of the editor's text."""
         document = editor.document()
         first = document.findBlockByNumber(max(0, line - 1))
         last = document.findBlockByNumber(max(0, end_line - 1))
         if not first.isValid():
-            return
+            return False
         if last.blockNumber() < first.blockNumber():
             last = first
         cursor = QTextCursor(document)
@@ -74,9 +217,17 @@ class CodePane:
         cursor.setPosition(last.position() + last.length() - 1, QTextCursor.MoveMode.KeepAnchor)
         selection = QTextEdit.ExtraSelection()
         selection.cursor = cursor
-        selection.format.setBackground(HIGHLIGHT)
-        editor.setExtraSelections([selection])
+        selection.format.setBackground(colour)
+        editor.setExtraSelections([*editor.extraSelections(), selection])
+        return True
+
+    @staticmethod
+    def _scroll_to(editor: QPlainTextEdit, line: int) -> None:
+        document = editor.document()
+        block = document.findBlockByNumber(max(0, line - 1))
+        if not block.isValid():
+            return
         scroll = QTextCursor(document)
-        scroll.setPosition(first.position())
+        scroll.setPosition(block.position())
         editor.setTextCursor(scroll)
         editor.centerCursor()

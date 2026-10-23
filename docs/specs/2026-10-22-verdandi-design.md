@@ -200,7 +200,8 @@ programs; a web player for the docs site.
 
 Peter reviewed a playthrough ("yes to all" D1-D9, brief `verdandi-viz-update.md`). These decisions
 change the player, not the trace format: the snapshot already carries the nets and the AST. D1
-(per-module playthroughs) shipped in V1; this section records D2-D4, the graph pane.
+(per-module playthroughs) shipped in V1; this section records D2-D4, the graph pane, and D8-D9,
+the step's source at a chosen call depth and the directory zoom.
 
 - **D2. Nets in the graph.** The Data pane's graph draws every net as an edge carrying a label.
   The core reports no net name on the recorded playthrough trace (every net record's name and
@@ -231,3 +232,44 @@ change the player, not the trace format: the snapshot already carries the nets a
   labelled "removed <kind> <name or qualified id>" so it cannot be mistaken for a live edge
   label). An added or changed net colours its edge the same way. The +/- log stays as its own
   dock (the secondary view); the graph adds the spatial picture.
+- **D8. The step's source at a chosen call depth.** The Code pane shows the exact lines of the
+  function(s) behind the current step: each step `code` record carries file, line, end_line and
+  function from `ODIN3_ROOT` (section 6), and the pane opens the record's file with that function
+  span highlighted. A record that names a function but spans one line (a rule event's log call)
+  is widened to the function's located definition, so depth 0 shows the body, not the log line;
+  a record without a function keeps its own span (a pass record is its whole file). A depth
+  control (0-5, default 0) sets how deep the code tree goes: depth 0 is
+  the step's own functions only; depth 1 adds the bodies of their direct callees, and every
+  further level adds the next ring of callees. A file with functions at several depths is one
+  tab, each function highlighted in its depth's colour. Depth > 0 needs a call graph, read in
+  this order:
+  1. **The code-review-graph database of the Odin III checkout**, `ODIN3_ROOT/.code-review-graph/
+     graph.db`, when that file exists and reads as a database. Function nodes carry `file_path`,
+     `line_start` and `line_end`; `CALLS` edges name the caller and the callee, and a callee
+     edge whose target is a bare name is resolved by function name (same file first, else the
+     only match). The database is opened read-only: `graph.db` and its `-wal` are never
+     written, though SQLite may create or touch the `graph.db-shm` shared-memory file beside it
+     as read-side bookkeeping.
+  2. **A static scan**, when no readable database is present: the section-6 C function-definition
+     scan of the step's file finds the function spans, and a call-site scan of the function body
+     (an identifier followed by `(`, C keywords and control statements excluded, comments and
+     string literals skipped) names the
+     callees, which are then resolved against the same file's definitions. A callee defined in
+     another file is not followed by this fallback.
+  A record without a function seeds every function its span intersects, so a whole-file pass
+  record reaches all of its file's functions (a file scope); when its span meets no function,
+  every function of the file seeds instead. The static scan seeds the same functions and scans
+  only their bodies, so the two sources agree.
+  A small note beside the control names the source in use ("call graph: code-review-graph DB",
+  "call graph: code-review-graph DB (file scope)" when a file scope seeded the expansion,
+  "call graph: static scan of <file>"), so the picture is never mistaken for one the database
+  gave; the note names the missing source when there is none (no source tree, an unreadable
+  database and an unreadable file). Depth 0 needs no call graph and adds no note.
+- **D9. Directory zoom.** A Source dock carries a collapsible directory tree of `ODIN3_ROOT`,
+  filled lazily: a directory's children are listed the first time it expands, and dot names are
+  skipped, so opening the pane never walks the tree. The tree zooms to the current step's first
+  `code` record: the path from the root to the record's file expands (`src`, `passes`, `proc.c`),
+  the file item is highlighted, and a `.c` file expands to its functions (the section-6 scan)
+  with the current function revealed. The tree keeps the keyboard (no selection, no focus), as
+  the step tree does; clicking a file opens it in the Code pane as its own tab. Without a source
+  tree the pane shows a note instead of a tree.

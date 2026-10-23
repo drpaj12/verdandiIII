@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QPushButton,
     QTreeView,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -25,11 +26,12 @@ from verdandi.gui.codepane import CodePane
 from verdandi.gui.datapane import DataPane
 from verdandi.gui.diffstrip import DiffStrip
 from verdandi.gui.explainpane import ExplainPane
+from verdandi.gui.sourcetree import SourcePane
 from verdandi.gui.verilogpane import VerilogPane
 from verdandi.navigator import Navigator
 from verdandi.trace import Step, Trace
 
-PANE_NAMES = ("Verilog", "Code", "Data", "Explanation", "Diff")
+PANE_NAMES = ("Verilog", "Code", "Data", "Explanation", "Diff", "Source")
 KEYS_HINT = "N next   I in   O out   B back   1-9 stage   Ctrl+F follow (again: next match)"
 
 
@@ -68,6 +70,8 @@ class MainWindow(QMainWindow):
         self.items: dict[str, QStandardItem] = {}
         self.docks: dict[str, QDockWidget] = {}
         self.panes: dict[str, Pane] = {}
+        self.code_pane: CodePane
+        self.source_pane: SourcePane
         self.matches: list[Step] = []
         self.match_index = 0
         self.match_name = ""
@@ -149,13 +153,18 @@ class MainWindow(QMainWindow):
             "Data": Qt.DockWidgetArea.RightDockWidgetArea,
             "Explanation": Qt.DockWidgetArea.BottomDockWidgetArea,
             "Diff": Qt.DockWidgetArea.BottomDockWidgetArea,
+            "Source": Qt.DockWidgetArea.LeftDockWidgetArea,
         }
+        self.code_pane = CodePane(root=self.code_root)
+        self.source_pane = SourcePane(root=self.code_root)
+        self.source_pane.tree.itemClicked.connect(self._open_source)
         panes: tuple[Pane, ...] = (
             VerilogPane(),
-            CodePane(root=self.code_root),
+            self.code_pane,
             DataPane(),
             ExplainPane(),
             DiffStrip(),
+            self.source_pane,
         )
         for name, pane in zip(PANE_NAMES, panes, strict=True):
             dock = QDockWidget(name, self)
@@ -164,6 +173,12 @@ class MainWindow(QMainWindow):
             self.addDockWidget(areas[name], dock)
             self.docks[name] = dock
             self.panes[name] = pane
+
+    def _open_source(self, item: QTreeWidgetItem, _column: int = 0) -> None:
+        """A click in the Source tree opens the item's file in the Code pane."""
+        file = self.source_pane.file_of(item)
+        if file is not None:
+            self.code_pane.open_file(file)
 
     def _build_menus(self) -> None:
         view_menu = self.menuBar().addMenu("View")

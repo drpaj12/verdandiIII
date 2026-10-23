@@ -195,3 +195,27 @@ tree and on the real `ODIN3_ROOT` (skipped when absent); player smoke test offsc
 Lessons cut from playthroughs; trace points inside Odin III (a core change, Peter reviews); the VPR
 stages (pack, place, route, with floorplan pictures); a Wyrd III Tools menu entry; adapters for other
 programs; a web player for the docs site.
+
+## 13. Visualization update (2026-10-23)
+
+Peter reviewed a playthrough ("yes to all" D1-D9, brief `verdandi-viz-update.md`). These decisions
+change the player, not the trace format: the snapshot already carries the nets and the AST. D1
+(per-module playthroughs) shipped in V1; this section records D2-D4, the graph pane.
+
+- **D2. Nets in the graph.** The Data pane's graph draws every net as an edge carrying the net's
+  name as its label; a net Odin III leaves unnamed (internal cells and nets) is labelled
+  `net <id>`, so no edge is blank. A "net names" checkbox hides and shows the edge labels. The
+  Nets table already names the nets; the graph catches up with it.
+- **D3. Which structure is shown.** The Data pane carries an explicit structure badge for the
+  current step: "IR after <pass> (netlist)" for an IR snapshot, "AST (parsed)" or
+  "AST (elaborated)" for an AST snapshot, "ABC network (picture)" for an ABC picture, and
+  "symbol table" while the symbol table is shown. The symbol table becomes a shown structure: a
+  table of scope (module), name, declaration and uses derived from the AST snapshot (a DECLARATOR
+  or INSTANCE node declares a name, an IDENT node uses it), for the parse and elaborate steps. IR
+  and PROC steps keep the IR view. A `$proc`'s RTLIL body is not part of a snapshot (section 5),
+  so no per-node expand exists and none is added.
+- **D4. The diff in colour.** The step diff is drawn on the IR graph as well as in the +/- log:
+  an added node is solid green, a changed node amber, and a removed object a dashed red outline
+  (a removed node or net has no place in the after snapshot, so it is drawn as its own node). An
+  added or changed net colours its edge the same way. The +/- log stays as its own dock (the
+  secondary view); the graph adds the spatial picture.

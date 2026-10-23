@@ -237,8 +237,10 @@ the step's source at a chosen call depth and the directory zoom.
   first source row's file and line (a line range when the record's `end_line` is past its start
   line); the AST tree has a second "Provenance" column with each node's `loc`; the symbol table
   has a "Provenance" column with each row's declaration loc, while its Declaration and Uses cells
-  keep their own locs for clicking. The graph draws each node's loc as a small `xlabel` badge and
-  a tooltip. The badge names the file's basename and the line (`playthrough.v:24`, `m.v:3-5`) so
+  keep their own locs for clicking. The graph draws each node's loc as a second, small label
+  line (an HTML-like label's 9-point grey row) and a tooltip, and every node carries a stable
+  SVG element id so a click can be hit-tested against it. The badge names the file's basename and
+  the line (`playthrough.v:24`, `m.v:3-5`) so
   it stays small; the tooltip keeps the trace's relative path. A global "show all provenance"
   toggle (checked by default) hides and shows every badge and the three table columns. The
   provenance chain stays clickable end to end: a graph node, an AST tree node and a table row or

@@ -232,6 +232,26 @@ the step's source at a chosen call depth and the directory zoom.
   labelled "removed <kind> <name or qualified id>" so it cannot be mistaken for a live edge
   label). An added or changed net colours its edge the same way. The +/- log stays as its own
   dock (the secondary view); the graph adds the spatial picture.
+- **D5. Provenance on everything.** Every data structure shown in the Data pane carries its
+  provenance name from the trace's loc records as a small badge. An IR node or net row shows its
+  first source row's file and line (a line range when the record's `end_line` is past its start
+  line); the AST tree has a second "Provenance" column with each node's `loc`; the symbol table
+  has a "Provenance" column with each row's declaration loc, while its Declaration and Uses cells
+  keep their own locs for clicking. The graph draws each node's loc as a small `xlabel` badge and
+  a tooltip. The badge names the file's basename and the line (`playthrough.v:24`, `m.v:3-5`) so
+  it stays small; the tooltip keeps the trace's relative path. A global "show all provenance"
+  toggle (checked by default) hides and shows every badge and the three table columns. The
+  provenance chain stays clickable end to end: a graph node, an AST tree node and a table row or
+  cell each lead to the source line (D6).
+- **D6. Click to the source line.** Clicking a graph node, a row or cell of the Nodes, Nets or
+  Symbols tables, or an AST tree node opens the trace's copy of the example source
+  (`src/<basename of the loc's file>`) in the Code pane at the loc's line. The Code pane opens it
+  as its own tab, highlights the loc's lines and centres the first one; a tab opened this way
+  sits beside the step's source tabs and survives a later step change. A click on an object
+  without a loc does nothing: no tab opens and no error is raised. Odin III core source stays the
+  secondary link where the core created an object: the step's Code pane source (D8) is unchanged
+  and remains the view of the function behind the step. A trace without its source copy shows
+  `source not available: <file>` in the tab instead of failing.
 - **D8. The step's source at a chosen call depth.** The Code pane shows the exact lines of the
   function(s) behind the current step: each step `code` record carries file, line, end_line and
   function from `ODIN3_ROOT` (section 6), and the pane opens the record's file with that function

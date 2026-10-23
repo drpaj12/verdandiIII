@@ -86,6 +86,28 @@ class GuiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(window.navigator.current().id, "s0008")
 
+    def test_ctrl_f_cycles_through_matches(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QApplication
+
+        from verdandi.gui.mainwindow import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = make_trace(Path(tmp) / "trace")
+            window = MainWindow(trace)
+            self.addCleanup(window.close)
+            window.show()
+            QApplication.processEvents()
+            control = Qt.KeyboardModifier.ControlModifier
+            QTest.keyClick(window, Qt.Key.Key_F, control)
+            QTest.keyClicks(window.follow_edit, "q[3]")
+            QTest.keyClick(window.follow_edit, Qt.Key.Key_Return)
+            self.assertEqual(window.title_label.text(), "read_techlib")
+            for expected in ("proc", "read_techlib", "proc"):
+                QTest.keyClick(QApplication.focusWidget() or window, Qt.Key.Key_F, control)
+                self.assertEqual(window.title_label.text(), expected)
+
     def test_space_after_stage_click_advances(self) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest

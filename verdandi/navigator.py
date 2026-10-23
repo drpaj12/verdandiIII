@@ -61,6 +61,10 @@ class Navigator:
             raise IndexError(f"no stage {index}: the trace has {len(roots)}")
         return self._move(roots[index])
 
+    def move_to(self, step_id: str) -> Step:
+        """The step with ``step_id`` (a follow match, say); an unknown id raises KeyError."""
+        return self._move(self.trace.step(step_id))
+
     def follow(self, name: str) -> list[Step]:
         """Every step whose diff names an object ``name``, in recording order.
 

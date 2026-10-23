@@ -162,6 +162,16 @@ class NavigatorTest(unittest.TestCase):
         self.assertEqual(navigator.follow("nope"), [])
         self.assertEqual(navigator.current().id, "s0007")
 
+    def test_move_to_is_undoable(self) -> None:
+        navigator = Navigator(self.trace)
+        self.assertEqual(navigator.move_to("s0007").id, "s0007")
+        self.assertEqual(navigator.back().id, "s0001")
+        self.assertEqual(navigator.move_to("s0001").id, "s0001")
+        self.assertEqual(navigator.back().id, "s0001")
+        with self.assertRaises(KeyError):
+            navigator.move_to("nope")
+        self.assertEqual(navigator.current().id, "s0001")
+
     def test_back_after_jump(self) -> None:
         navigator = Navigator(self.trace)
         self.assertEqual(navigator.jump_stage(2).id, "s0008")

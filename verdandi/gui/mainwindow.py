@@ -23,7 +23,7 @@ from verdandi.navigator import Navigator
 from verdandi.trace import Step, Trace
 
 PANE_NAMES = ("Verilog", "Code", "Data", "Explanation", "Diff")
-KEYS_HINT = "N next   I in   O out   B back   1-9 stage   Ctrl+F follow"
+KEYS_HINT = "N next   I in   O out   B back   1-9 stage   Ctrl+F follow (again: next match)"
 
 
 class MainWindow(QMainWindow):
@@ -48,6 +48,9 @@ class MainWindow(QMainWindow):
         self.model = QStandardItemModel(self)
         self.items: dict[str, QStandardItem] = {}
         self.docks: dict[str, QDockWidget] = {}
+        self.matches: list[Step] = []
+        self.match_index = 0
+        self.match_name = ""
         self._build()
         self._build_menus()
         self._refresh()
@@ -178,20 +181,39 @@ class MainWindow(QMainWindow):
         name = self.follow_edit.text().strip()
         if not name:
             return
-        matches = self.navigator.follow(name)
+        self.matches = self.navigator.follow(name)
+        self.match_name = name
+        self.match_index = 0
         self.setFocus()
         self._refresh()
-        if matches:
-            self.statusBar().showMessage(f"{len(matches)} steps touch {name}")
+        if self.matches:
+            self._show_match()
         else:
             self.statusBar().showMessage(f"no step touches {name}")
+
+    def _show_match(self) -> None:
+        self.statusBar().showMessage(
+            f"match {self.match_index + 1} of {len(self.matches)}: {self.match_name}"
+        )
+
+    def _next_match(self) -> None:
+        """Cycle to the next follow match, wrapping after the last one."""
+        self.match_index = (self.match_index + 1) % len(self.matches)
+        self.navigator.move_to(self.matches[self.match_index].id)
+        self.setFocus()
+        self._refresh()
+        self._show_match()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()  # an int in PySide6, not a Qt.Key member
         control = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if key == Qt.Key.Key_F.value and control:
-            self.follow_edit.setFocus()
-            self.follow_edit.selectAll()
+            name = self.follow_edit.text().strip()
+            if name and name == self.match_name and self.matches:
+                self._next_match()
+            else:
+                self.follow_edit.setFocus()
+                self.follow_edit.selectAll()
             event.accept()
             return
         index = key - Qt.Key.Key_1.value

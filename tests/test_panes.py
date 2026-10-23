@@ -292,6 +292,26 @@ class PaneTest(unittest.TestCase):
                 "source not available: src/passes/nope/nope.c", widget.toPlainText()
             )
 
+    def test_code_line_past_eof(self) -> None:
+        """A ref past the file's last line highlights nothing and logs no invalid cursor."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            trace = code_trace(Path(tmp) / "trace", root)
+            step = trace.steps[0]
+            step.code[0].line = 99
+            step.code[0].end_line = 99
+            pane = CodePane(root=root)
+            pane.show(step, trace)
+            widget = pane.tabs.widget(0)
+            self.assertIsInstance(widget, QPlainTextEdit)
+            assert isinstance(widget, QPlainTextEdit)
+            self.assertIn("int two;", widget.toPlainText())
+            self.assertEqual(widget.extraSelections(), [])
+
     def test_data_filters_touched(self) -> None:
         from verdandi.gui.datapane import DataPane
 

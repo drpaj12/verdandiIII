@@ -65,6 +65,8 @@ class CodePane:
         document = editor.document()
         first = document.findBlockByNumber(max(0, line - 1))
         last = document.findBlockByNumber(max(0, end_line - 1))
+        if not first.isValid():
+            return
         if last.blockNumber() < first.blockNumber():
             last = first
         cursor = QTextCursor(document)

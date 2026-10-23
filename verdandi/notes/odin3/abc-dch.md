@@ -9,4 +9,4 @@ says how many of them are choices, and `lev` stays because a choice is one more 
 the same node, not another level.
 
 What to look for: in the 4x4 multiply `and` rises from 83 to 94 but the line carries
-`(choice = 7)`; the counter shows no choices to make.
+`(choice = 7)`; for the counter `and` rises from 5 to 11, with `(choice = 2)`.

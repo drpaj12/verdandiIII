@@ -80,6 +80,17 @@ class CliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("verdandi play:", stderr.getvalue())
 
+    def test_play_empty_trace_is_usage_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "trace"
+            save(directory, make_manifest(), [], {}, [])
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = main(["play", str(directory)])
+            self.assertEqual(code, 2)
+            self.assertIn("verdandi play:", stderr.getvalue())
+            self.assertIn("no steps", stderr.getvalue())
+
 
     def test_info_valid_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

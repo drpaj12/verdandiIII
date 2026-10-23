@@ -162,6 +162,13 @@ class TraceFileTest(unittest.TestCase):
         self.assertEqual(trace.children("s0003"), [])
         self.assertEqual(trace.step("s0003").title, "Parse")
 
+    def test_empty_steps_are_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            save(Path(directory), make_manifest(), [], {}, [])
+            with self.assertRaises(ValueError) as caught:
+                load(Path(directory))
+            self.assertIn("no steps", str(caught.exception))
+
     def test_sources_copied(self) -> None:
         data = b"module counter;\r\n\treg q;\r\nendmodule\r\n"
         with tempfile.TemporaryDirectory() as work, tempfile.TemporaryDirectory() as directory:
@@ -325,7 +332,7 @@ class TraceAtomicSaveTest(unittest.TestCase):
 class TraceVersionTest(unittest.TestCase):
     def _saved_version(self, work: str, value: object) -> Path:
         directory = Path(work) / "trace"
-        save(directory, make_manifest(), [], {}, [])
+        save(directory, make_manifest(), make_steps()[:1], {}, [])
         manifest_path = directory / "manifest.json"
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         data["version"] = value

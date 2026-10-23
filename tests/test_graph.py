@@ -6,7 +6,7 @@ import copy
 import unittest
 from typing import Any
 
-from verdandi.graph import net_classes, node_classes, slice_dot
+from verdandi.graph import net_classes, node_classes, node_element_id, slice_dot
 from verdandi.trace import Diff, ObjRef
 
 SNAPSHOT: dict[str, Any] = {
@@ -278,6 +278,78 @@ class SliceDotTest(unittest.TestCase):
             line for line in dot.splitlines() if '"counter2:2" -> "counter2:3"' in line
         )
         self.assertIn('color="#1a7f37"', line)
+
+
+class ProvenanceDotTest(unittest.TestCase):
+    """D5: graph nodes carry an element id and, when shown, their provenance badge."""
+
+    def _snapshot(self) -> dict[str, Any]:
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["modules"][0]["nodes"][0]["sources"] = [["examples/m.v", 3, 7, 5, 12]]
+        return snapshot
+
+    def test_node_element_ids(self) -> None:
+        """Every drawn node carries a stable SVG element id for the click hit test (D6)."""
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 1, "a")],
+            by_name=False,
+        )
+        dot = slice_dot(SNAPSHOT, diff)
+        self.assertEqual(node_element_id("counter2", 1), "vnd-counter2-1")
+        self.assertIn('id="vnd-counter2-1"', _node_line(dot, "counter2:1"))
+        self.assertIn('id="vnd-counter2-2"', _node_line(dot, "counter2:2"))
+
+    def test_provenance_badge_on_a_node(self) -> None:
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 1, "a")],
+            by_name=False,
+        )
+        dot = slice_dot(self._snapshot(), diff, show_provenance=True)
+        line = _node_line(dot, "counter2:1")
+        self.assertIn(
+            '<FONT POINT-SIZE="9" COLOR="#57606a">m.v:3-5</FONT>', line
+        )
+        self.assertIn('tooltip="examples/m.v:3-5"', line)
+
+    def test_provenance_hidden_by_default(self) -> None:
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 1, "a")],
+            by_name=False,
+        )
+        dot = slice_dot(self._snapshot(), diff)
+        self.assertNotIn("FONT POINT-SIZE", dot)
+        self.assertNotIn("tooltip=", dot)
+
+    def test_node_without_a_loc_has_no_badge(self) -> None:
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 1, "a")],
+            by_name=False,
+        )
+        dot = slice_dot(SNAPSHOT, diff, show_provenance=True)
+        self.assertNotIn("FONT POINT-SIZE", dot)
+        self.assertNotIn("tooltip=", dot)
+
+    def test_html_label_is_escaped(self) -> None:
+        """A node name with HTML characters stays text, not label markup."""
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["modules"][0]["nodes"][0]["name"] = "a&b"
+        snapshot["modules"][0]["nodes"][0]["sources"] = [["m.v", 1, 1, 1, 2]]
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 1, "a")],
+            by_name=False,
+        )
+        dot = slice_dot(snapshot, diff, show_provenance=True)
+        self.assertIn("<TD>a&amp;b</TD>", dot)
 
 
 def _node_line(dot: str, key: str) -> str:

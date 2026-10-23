@@ -14,18 +14,26 @@ object (absent from the after snapshot, so it has no place in the graph) a dashe
 own, labelled "removed <kind> <name>" so it cannot be mistaken for a live edge label; an added or
 changed net colours its edge. The Data pane renders this text with ``dot -Tsvg`` when Graphviz is
 installed.
+
+Provenance (D5, D6): every drawn node carries a stable SVG element id ``vnd-<module>-<id>``, so
+the Data pane's graph widget can hit-test a click against the node. With ``show_provenance`` the
+node label gains a second, small line with its first source row's badge (the file's basename and
+the line) and the node carries the full reference as a tooltip.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from verdandi.provenance import Loc, object_loc
 from verdandi.symtab import symbol_rows
 from verdandi.trace import Diff
 
 NodeKey = tuple[str, int]
 # Driver, sink, net name, net id.
 Edge = tuple[NodeKey, NodeKey, str, int]
+# The small provenance badge's font colour, shared by the data panes.
+PROVENANCE_COLOR = "#57606a"
 
 # Node attributes per diff class, in the diff strip's colours (green, red, amber).
 CLASS_STYLES = {
@@ -41,9 +49,43 @@ EDGE_STYLES = {
 }
 
 
+def node_element_id(module: str, node_id: int) -> str:
+    """The SVG element id of a drawn node, for the graph's click hit test (D6)."""
+    return f"vnd-{module}-{node_id}"
+
+
+def node_locs(snapshot: dict[str, Any]) -> dict[NodeKey, Loc]:
+    """Each IR node's first source row, keyed by ``(module, id)``; nodes without one are absent."""
+    found: dict[NodeKey, Loc] = {}
+    for module in snapshot.get("modules", []):
+        name = str(module.get("name", ""))
+        for node in module.get("nodes", []):
+            loc = object_loc(node)
+            if loc is not None:
+                found[(name, int(node["id"]))] = loc
+    return found
+
+
 def _quote(text: str) -> str:
     """A double-quoted dot string with backslashes and quotes escaped."""
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _html(text: str) -> str:
+    """Text escaped for a Graphviz HTML-like label's text content."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _node_label(label: str, badge: str | None) -> str:
+    """A node label: plain, or with the provenance badge as a second small line (D5)."""
+    if badge is None:
+        return _quote(label)
+    return (
+        "<<TABLE BORDER=\"0\" CELLBORDER=\"0\" CELLSPACING=\"0\">"
+        f"<TR><TD>{_html(label)}</TD></TR>"
+        f"<TR><TD><FONT POINT-SIZE=\"9\" COLOR=\"{PROVENANCE_COLOR}\">"
+        f"{_html(badge)}</FONT></TD></TR></TABLE>>"
+    )
 
 
 def net_label(net_name: str, net_id: int, module: str, derived_name: str = "") -> str:
@@ -209,6 +251,7 @@ def slice_dot(
     *,
     show_net_names: bool = True,
     ast: dict[str, Any] | None = None,
+    show_provenance: bool = False,
 ) -> str:
     """The dot digraph of the diff's touched nodes plus ``rings`` rings of neighbours.
 
@@ -216,8 +259,10 @@ def slice_dot(
     what the picture can draw); a ``wire`` ref has no graph connections. Every drawn edge is
     labelled with its net's name, or with the AST declaration name and module-qualified id, or
     ``net <module>:<id>`` when there is neither, unless ``show_net_names`` is false. ``ast`` is
-    an AST snapshot whose declarations name unnamed nets. Deterministic: node lines sorted by
-    ``(module, id)`` and edges by their fields.
+    an AST snapshot whose declarations name unnamed nets. ``show_provenance`` adds each node's
+    source line as a second, small label line and a tooltip. Every node carries an SVG element id
+    whether or not its badge shows. Deterministic: node lines sorted by ``(module, id)`` and
+    edges by their fields.
     """
     if snapshot.get("kind") != "ir":
         raise ValueError("slice_dot: only an IR snapshot has a graph")
@@ -246,13 +291,21 @@ def slice_dot(
     classes = node_classes(diff)
     classes_by_net = net_classes(diff)
     derived_names = ast_net_names(snapshot, ast)
+    locations = node_locs(snapshot)
     lines = ["digraph slice {"]
     for key in sorted(touched):
         label = names[key] or f"{key[0]}:{key[1]}"
-        attributes = [f"label={_quote(label)}"]
+        loc = locations.get(key)
+        shown = loc if show_provenance else None
+        attributes = [
+            f"label={_node_label(label, None if shown is None else shown.badge)}",
+            f"id={_quote(node_element_id(*key))}",
+        ]
         kind = classes.get(key)
         if kind is not None:
             attributes.append(CLASS_STYLES[kind])
+        if shown is not None:
+            attributes.append(f"tooltip={_quote(shown.reference)}")
         lines.append(f"  {_quote(f'{key[0]}:{key[1]}')} [{', '.join(attributes)}];")
     lines.extend(_removed_lines(diff))
     for driver, sink, net_name, net_id in sorted(edges):

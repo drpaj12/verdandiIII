@@ -8,6 +8,12 @@ in its depth's colour and the view scrolls to the first one. A missing file show
 call graph of ``verdandi.callgraph``; a note beside it names the source that graph came from
 (the code-review-graph database, marked "file scope" when a record covered no single function,
 or a static scan), so the two are never confused.
+
+The pane also opens whole files in extra tabs: a Source-tree click (D9) and an example source
+clicked in the Data pane (D6, ``open_example``). An example source is the trace's own copy
+(``src/<basename>``), not the Odin III tree; it opens at the clicked loc's line, highlighted and
+centred. Extra tabs sit beside the step's source tabs and survive a step change, so a click into
+an example does not vanish on the next step.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from verdandi.callgraph import (
     expand,
 )
 from verdandi.gui.verilogpane import read_source
+from verdandi.provenance import Loc
 from verdandi.trace import Step, Trace
 
 HIGHLIGHT = QColor("#ddf4ff")
@@ -101,6 +108,8 @@ class CodePane:
         self._trace: Trace | None = None
         self._spans: list[Span] = []
         self._files: dict[str, QPlainTextEdit] = {}
+        self._extras: dict[str, QPlainTextEdit] = {}
+        self._extra_titles: dict[str, str] = {}
         self.depth_box.valueChanged.connect(self._rerender)
 
     def show(self, step: Step, trace: Trace) -> None:
@@ -114,22 +123,59 @@ class CodePane:
 
     def open_file(self, file: str) -> None:
         """Open one file of the source tree whole in its own tab (a source-tree click)."""
+        key = f"file:{file}"
+        existing = self._extras.get(key)
+        if existing is not None:
+            self.tabs.setCurrentWidget(existing)
+            return
         root = code_root(self.root)
-        editor = self._files.get(file)
-        if editor is None or self.tabs.indexOf(editor) < 0:
-            editor = self._whole_editor(file, root)
-            self.tabs.addTab(editor, Path(file).name)
-            self._files[file] = editor
+        self._open_extra(key, Path(file).name, self._whole_editor(file, root))
+
+    def open_example(self, loc: Loc, sources: Path) -> None:
+        """Open the trace's copy of an example source at ``loc``'s line (D6).
+
+        The trace keeps its sources by basename (``src/<basename>``); a loc whose file the trace
+        does not hold opens a tab that says so instead of raising.
+        """
+        name = Path(loc.file.replace("\\", "/")).name
+        path = sources / name
+        editor = (
+            self._whole_editor_at(path, loc)
+            if path.is_file()
+            else self._unavailable(loc.file)
+        )
+        self._open_extra(f"example:{name}", name, editor)
+
+    def _open_extra(self, key: str, title: str, editor: QPlainTextEdit) -> None:
+        """Put a whole-file editor in an extra tab, replacing an earlier tab of the same key."""
+        previous = self._extras.get(key)
+        if previous is not None:
+            index = self.tabs.indexOf(previous)
+            if index >= 0:
+                self.tabs.removeTab(index)
+            previous.deleteLater()
+        self._extras[key] = editor
+        self._extra_titles[key] = title
+        self.tabs.addTab(editor, title)
         self.tabs.setCurrentWidget(editor)
+
+    def _readd_extras(self, current: QWidget | None) -> None:
+        """Re-add the extra tabs after a step render; keep the user's tab when it survives."""
+        for key, editor in self._extras.items():
+            self.tabs.addTab(editor, self._extra_titles[key])
+        if current is not None and self.tabs.indexOf(current) >= 0:
+            self.tabs.setCurrentWidget(current)
 
     def _rerender(self, _value: int = 0) -> None:
         if self._step is not None and self._trace is not None:
             self._render()
 
     def _render(self) -> None:
+        current = self.tabs.currentWidget()
         self.tabs.clear()
         self._files = {}
         if self._step is None:
+            self._readd_extras(current)
             return
         root = code_root(self.root)
         expansion = expand(root, self._step.code, self.depth_box.value())
@@ -142,6 +188,7 @@ class CodePane:
             editor = self._editor(file, root, spans)
             self.tabs.addTab(editor, self._title(file, spans))
             self._files[file] = editor
+        self._readd_extras(current)
 
     def _set_note(self, expansion: Expansion, depth: int) -> None:
         """Name the call-graph source in use; depth 0 needs no graph and shows no note."""
@@ -193,12 +240,25 @@ class CodePane:
     def _whole_editor(self, file: str, root: Path | None) -> QPlainTextEdit:
         path = None if root is None else root / file
         if path is None or not path.is_file():
-            editor = QPlainTextEdit(f"source not available: {file}")
-            editor.setReadOnly(True)
-            return editor
+            return self._unavailable(file)
         editor = QPlainTextEdit(read_source(path))
         editor.setReadOnly(True)
         editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        return editor
+
+    def _whole_editor_at(self, path: Path, loc: Loc) -> QPlainTextEdit:
+        """A whole example source, its loc's line range highlighted and the line centred."""
+        editor = QPlainTextEdit(read_source(path))
+        editor.setReadOnly(True)
+        editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self._highlight_span(editor, loc.line, loc.end_line, HIGHLIGHT)
+        self._scroll_to(editor, loc.line)
+        return editor
+
+    @staticmethod
+    def _unavailable(file: str) -> QPlainTextEdit:
+        editor = QPlainTextEdit(f"source not available: {file}")
+        editor.setReadOnly(True)
         return editor
 
     def _highlight_span(

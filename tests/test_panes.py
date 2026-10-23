@@ -7,13 +7,18 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from tests.helpers import HAVE_DOT
 from tests.test_navigator import make_manifest
+from verdandi.provenance import Loc
 from verdandi.trace import CodeRef, Diff, ObjRef, Step, Trace, load, save
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QTreeWidgetItem
 
 HAVE_QT = importlib.util.find_spec("PySide6") is not None
 
@@ -79,6 +84,118 @@ def highlight_trace(directory: Path, span_paths: bool = False) -> Trace:
         )
     ]
     save(directory, make_manifest(), steps, {"s0001.json": snapshot}, sources)
+    return load(directory)
+
+
+def provenance_trace(directory: Path) -> Trace:
+    """An IR step and an AST step whose objects carry example-source locs (D5, D6)."""
+    source = directory.parent / "prov.v"
+    source.write_text(
+        "module prov;\nreg clk;\nassign clk = 0;\nendmodule\n", encoding="utf-8"
+    )
+    ir = ir_snapshot(
+        [
+            {
+                "name": "m",
+                "nodes": [
+                    {
+                        "id": 1,
+                        "name": "a",
+                        "type": "$dff",
+                        "params": {},
+                        "pins": [],
+                        "sources": [["examples/prov.v", 2, 5, 2, 8]],
+                    },
+                    {
+                        "id": 2,
+                        "name": "b",
+                        "type": "$not",
+                        "params": {},
+                        "pins": [],
+                        "sources": [],
+                    },
+                ],
+                "nets": [
+                    {
+                        "id": 20,
+                        "name": "n",
+                        "drivers": [1],
+                        "sinks": [2],
+                        "sources": [["examples/prov.v", 3, 8, 3, 11]],
+                    }
+                ],
+                "wires": [],
+            }
+        ]
+    )
+    ast = {
+        "kind": "ast",
+        "form": "ELABORATED",
+        "roots": [
+            {
+                "kind": "UNIT",
+                "sub": "",
+                "name": "prov.v",
+                "loc": "examples/prov.v:1:1",
+                "children": [
+                    {
+                        "kind": "MODULE",
+                        "sub": "",
+                        "name": "m",
+                        "loc": "examples/prov.v:1:1",
+                        "children": [
+                            {
+                                "kind": "DECLARATOR",
+                                "sub": "",
+                                "name": "clk",
+                                "loc": "examples/prov.v:2:5",
+                                "children": [],
+                            },
+                            {
+                                "kind": "IDENT",
+                                "sub": "",
+                                "name": "clk",
+                                "loc": "examples/prov.v:3:9",
+                                "children": [],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    diff = Diff(
+        added=[],
+        removed=[],
+        changed=[ObjRef("m", "node", 1, "a"), ObjRef("m", "net", 20, "n")],
+        by_name=False,
+    )
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=1,
+            title="opt",
+            anchor="pass:opt",
+            snapshot="s0001.json",
+            diff=diff,
+        ),
+        Step(
+            id="s0002",
+            parent=None,
+            level=2,
+            title="Elaborated",
+            anchor="pass:read_verilog",
+            snapshot="s0002.json",
+        ),
+    ]
+    save(
+        directory,
+        make_manifest(),
+        steps,
+        {"s0001.json": ir, "s0002.json": ast},
+        [source],
+    )
     return load(directory)
 
 
@@ -327,6 +444,14 @@ def depth_trace(directory: Path, root: Path) -> Trace:
         code=[CodeRef(file="src/a.c", line=9, end_line=12, function="top")],
     )
     return Trace(directory, make_manifest(), [step])
+
+
+def tree_child(item: QTreeWidgetItem | None, index: int = 0) -> QTreeWidgetItem:
+    """A tree item's child, asserting it exists (the AST trees in these tests are known)."""
+    assert item is not None
+    child = item.child(index)
+    assert child is not None
+    return child
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
@@ -585,6 +710,76 @@ class PaneTest(unittest.TestCase):
             self.assertIn("int mid(int y) {", widget.toPlainText())
             self.assertEqual(widget.extraSelections(), [])
 
+    def test_code_open_example_at_line(self) -> None:
+        """D6: an example loc opens the trace's source copy, highlighted and centred."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace")
+            pane = CodePane()
+            pane.open_example(Loc("examples/crlf.v", 2, 2), trace.directory / "src")
+            self.assertEqual(pane.tabs.count(), 1)
+            self.assertEqual(pane.tabs.tabText(0), "crlf.v")
+            editor = pane.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("wire alpha;", editor.toPlainText())
+            self.assertEqual(len(editor.extraSelections()), 1)
+            self.assertEqual(editor.textCursor().blockNumber(), 1)
+
+    def test_code_open_example_missing_source(self) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace")
+            pane = CodePane()
+            pane.open_example(Loc("examples/gone.v", 3, 3), trace.directory / "src")
+            editor = pane.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("source not available: examples/gone.v", editor.toPlainText())
+
+    def test_code_example_tab_survives_a_step_change(self) -> None:
+        """An example tab sits beside the step tabs and is not cleared by the next step."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            step_source = root / "src" / "a.c"
+            step_source.parent.mkdir(parents=True)
+            step_source.write_text("int a;\nint b;\n", encoding="utf-8")
+            code = [CodeRef(file="src/a.c", line=1, end_line=1, function="a")]
+            trace = highlight_trace(Path(tmp) / "trace")
+            second = Step(
+                id="s0002",
+                parent=None,
+                level=1,
+                title="opt",
+                anchor="pass:opt",
+                snapshot="s0001.json",
+                diff=trace.steps[0].diff,
+                code=code,
+            )
+            first = trace.steps[0]
+            first.code = code
+            trace = Trace(trace.directory, trace.manifest, [first, second])
+            pane = CodePane(root=root)
+            pane.show(first, trace)
+            self.assertEqual(pane.tabs.count(), 1)
+            pane.open_example(Loc("examples/crlf.v", 2, 2), trace.directory / "src")
+            self.assertEqual(pane.tabs.count(), 2)
+            self.assertEqual(pane.tabs.tabText(1), "crlf.v")
+            pane.show(second, trace)
+            self.assertEqual(pane.tabs.count(), 2)
+            self.assertEqual(pane.tabs.tabText(0), "a")
+            editor = pane.tabs.widget(1)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("wire alpha;", editor.toPlainText())
+
     def test_data_filters_touched(self) -> None:
         from verdandi.gui.datapane import DataPane
 
@@ -598,6 +793,232 @@ class PaneTest(unittest.TestCase):
             self.assertEqual(item.text(), "1")
             pane.all_box.setChecked(True)
             self.assertEqual(pane.node_table.rowCount(), 2)
+
+    def test_provenance_badges_on_rows_trees_and_symbols(self) -> None:
+        """D5: every structure row carries its loc as a small badge."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            pane = DataPane()
+            pane.show(trace.steps[0], trace)
+            self.assertTrue(pane.provenance_box.isChecked())
+            self.assertEqual(pane.provenance_box.text(), "show all provenance")
+            header = pane.node_table.horizontalHeaderItem(4)
+            assert header is not None
+            self.assertEqual(header.text(), "Provenance")
+            node = pane.node_table.item(0, 4)
+            assert node is not None
+            self.assertEqual(node.text(), "prov.v:2")
+            net = pane.net_table.item(0, 4)
+            assert net is not None
+            self.assertEqual(net.text(), "prov.v:3")
+            pane.show(trace.steps[1], trace)
+            self.assertEqual(pane.ast_tree.headerItem().text(1), "Provenance")
+            module = tree_child(pane.ast_tree.topLevelItem(0))
+            declarator = tree_child(module)
+            self.assertEqual(declarator.text(1), "prov.v:2")
+            symbol = pane.symbol_table.item(0, 4)
+            assert symbol is not None
+            self.assertEqual(symbol.text(), "prov.v:2")
+
+    def test_provenance_toggle_hides_and_shows_badges(self) -> None:
+        """D5: one toggle hides the badge columns and drops them from the graph."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        dot_texts: list[str] = []
+
+        def capture(text: str) -> bytes:
+            dot_texts.append(text)
+            return svg
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "render_dot", side_effect=capture):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+                self.assertIn("FONT POINT-SIZE", dot_texts[-1])
+                pane.provenance_box.setChecked(False)
+                self.assertNotIn("FONT POINT-SIZE", dot_texts[-1])
+                self.assertTrue(pane.node_table.isColumnHidden(4))
+                self.assertTrue(pane.net_table.isColumnHidden(4))
+                pane.show(trace.steps[1], trace)
+                self.assertTrue(pane.ast_tree.isColumnHidden(1))
+                self.assertTrue(pane.symbol_table.isColumnHidden(4))
+                pane.provenance_box.setChecked(True)
+                self.assertFalse(pane.ast_tree.isColumnHidden(1))
+                module = tree_child(pane.ast_tree.topLevelItem(0))
+                self.assertEqual(tree_child(module).text(1), "prov.v:2")
+
+    def test_click_node_and_net_rows_open_the_loc(self) -> None:
+        """D6: a nodes or nets row click reports its source loc."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            pane = DataPane()
+            pane.on_source_clicked = opened.append
+            pane.show(trace.steps[0], trace)
+            pane.node_table.cellClicked.emit(0, 0)
+            pane.node_table.cellClicked.emit(0, 4)
+            pane.net_table.cellClicked.emit(0, 3)
+        self.assertEqual(
+            opened,
+            [
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 3, 3),
+            ],
+        )
+
+    def test_click_ast_and_symbol_cells_open_their_own_loc(self) -> None:
+        """D6: an AST node click and a symbol Declaration or Uses cell name their loc."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            pane = DataPane()
+            pane.on_source_clicked = opened.append
+            pane.show(trace.steps[1], trace)
+            module = tree_child(pane.ast_tree.topLevelItem(0))
+            declarator = tree_child(module)
+            pane.ast_tree.itemClicked.emit(declarator, 0)
+            pane.symbol_table.cellClicked.emit(0, 2)
+            pane.symbol_table.cellClicked.emit(0, 3)
+        self.assertEqual(
+            opened,
+            [
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 3, 3),
+            ],
+        )
+
+    def test_click_without_a_loc_does_nothing(self) -> None:
+        """D6: an object with no loc reports nothing and raises nothing."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            pane = DataPane()
+            pane.on_source_clicked = opened.append
+            pane.show(trace.steps[0], trace)
+            pane.all_box.setChecked(True)
+            item = pane.node_table.item(1, 0)
+            assert item is not None
+            self.assertEqual(item.text(), "2")
+            pane.node_table.cellClicked.emit(1, 0)
+        self.assertEqual(opened, [])
+
+    def test_click_graph_node_opens_the_loc(self) -> None:
+        """D6: a click on a drawn graph node hits its SVG element and reports its loc."""
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        from verdandi.graph import node_element_id
+        from verdandi.gui import datapane
+
+        element = node_element_id("m", 1)
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" '
+            'viewBox="0 0 100 100">'
+            f'<g id="{element}"><rect x="0" y="0" width="80" height="80"/></g></svg>'
+        ).encode()
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            with mock.patch.object(datapane, "render_dot", return_value=svg):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+            pane.graph.resize(100, 100)
+            pane.on_source_clicked = opened.append
+
+            def click(x: float, y: float) -> None:
+                position = QPointF(x, y)
+                event = QMouseEvent(
+                    QEvent.Type.MouseButtonPress,
+                    position,
+                    position,
+                    Qt.MouseButton.LeftButton,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+                pane.graph.mousePressEvent(event)
+
+            click(20, 20)
+            click(95, 95)
+        self.assertEqual(opened, [Loc("examples/prov.v", 2, 2)])
+
+    @unittest.skipUnless(HAVE_DOT, "Graphviz dot is not installed")
+    def test_click_and_hover_a_real_graphviz_node(self) -> None:
+        """D6/D5: a real dot SVG's translated, non-square picture maps clicks and hovers.
+
+        Graphviz wraps the drawing in a ``translate`` group and the renderer stretches the
+        picture into the widget, so the node's element bounds and the widget point differ in both
+        axes by more than a square, transform-free fixture shows.
+        """
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        from verdandi.graph import node_element_id
+        from verdandi.gui import datapane
+
+        element = node_element_id("m", 1)
+        dot_text = (
+            "digraph slice {\n"
+            f'  "m:1" [label="a", id="{element}"];\n'
+            '  "m:2" [label="b"];\n'
+            '  "m:3" [label="c"];\n'
+            '  "m:4" [label="d"];\n'
+            '  "m:1" -> "m:2";\n'
+            "}\n"
+        )
+        svg = datapane.render_dot(dot_text)
+        assert svg is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            with mock.patch.object(datapane, "render_dot", return_value=svg):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+            pane.graph.resize(300, 100)
+            pane.on_source_clicked = opened.append
+            self.assertTrue(pane.graph.hasMouseTracking())
+            box = pane.graph.renderer().viewBoxF()
+            rect = pane.graph.node_rect(element)
+            centre = QPointF(
+                (rect.center().x() - box.x()) * pane.graph.width() / box.width(),
+                (rect.center().y() - box.y()) * pane.graph.height() / box.height(),
+            )
+            corner = QPointF(1, 1)
+
+            def mouse(kind: QEvent.Type, point: QPointF, button: Qt.MouseButton) -> QMouseEvent:
+                return QMouseEvent(
+                    kind,
+                    point,
+                    point,
+                    button,
+                    button,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+
+            pane.graph.mouseMoveEvent(mouse(QEvent.Type.MouseMove, centre, Qt.MouseButton.NoButton))
+            self.assertEqual(pane.graph.toolTip(), "examples/prov.v:2")
+            pane.graph.mousePressEvent(
+                mouse(QEvent.Type.MouseButtonPress, centre, Qt.MouseButton.LeftButton)
+            )
+            pane.graph.mouseMoveEvent(
+                mouse(QEvent.Type.MouseMove, corner, Qt.MouseButton.NoButton)
+            )
+            self.assertEqual(pane.graph.toolTip(), "")
+            pane.graph.mousePressEvent(
+                mouse(QEvent.Type.MouseButtonPress, corner, Qt.MouseButton.LeftButton)
+            )
+        self.assertEqual(opened, [Loc("examples/prov.v", 2, 2)])
 
     def test_net_name_toggle(self) -> None:
         """The graph labels every net; the net-names checkbox hides the labels."""
@@ -992,6 +1413,26 @@ class PaneTest(unittest.TestCase):
             self.assertIsInstance(widget, QPlainTextEdit)
             assert isinstance(widget, QPlainTextEdit)
             self.assertIn("int two;", widget.toPlainText())
+
+    def test_mainwindow_click_opens_the_example_line(self) -> None:
+        """D6: a Data pane row click opens the example source at its line in the Code pane."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.mainwindow import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            window = MainWindow(trace)
+            self.addCleanup(window.close)
+            self.assertIsNotNone(window.data_pane.on_source_clicked)
+            window.data_pane.node_table.cellClicked.emit(0, 0)
+            code = window.code_pane
+            self.assertEqual(code.tabs.count(), 1)
+            self.assertEqual(code.tabs.tabText(0), "prov.v")
+            editor = code.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertIn("reg clk;", editor.toPlainText())
+            self.assertEqual(editor.textCursor().blockNumber(), 1)
 
     def test_explain_fallback_order(self) -> None:
         from verdandi.gui.explainpane import ExplainPane

@@ -1,8 +1,9 @@
 """The Code pane: the Odin III source at the current step's code locations.
 
 One read-only tab per ``CodeRef``. A file is read from ``ODIN3_ROOT`` (or the root given to the
-pane), the ``line..end_line`` lines are highlighted and the view scrolls to the first one; a
-missing file shows ``source not available: <file>`` in its tab instead of raising.
+pane, which the entry point takes from the ``codeRoot`` app setting), the ``line..end_line``
+lines are highlighted and the view scrolls to the first one; a missing file shows ``source not
+available: <file>`` in its tab instead of raising.
 """
 
 from __future__ import annotations

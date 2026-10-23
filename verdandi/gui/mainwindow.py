@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 from typing import Protocol
 
 from PySide6.QtCore import Qt
@@ -48,9 +49,16 @@ class MainWindow(QMainWindow):
     Ctrl+F. Space therefore always reaches the Next binding, whatever was clicked last.
     """
 
-    def __init__(self, trace: Trace, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        trace: Trace,
+        parent: QWidget | None = None,
+        *,
+        code_root: Path | None = None,
+    ) -> None:
         super().__init__(parent)
         self.trace = trace
+        self.code_root = code_root
         self.navigator = Navigator(trace)
         self.stage_buttons: list[QPushButton] = []
         self.title_label = QLabel()
@@ -144,7 +152,7 @@ class MainWindow(QMainWindow):
         }
         panes: tuple[Pane, ...] = (
             VerilogPane(),
-            CodePane(),
+            CodePane(root=self.code_root),
             DataPane(),
             ExplainPane(),
             DiffStrip(),

@@ -201,6 +201,26 @@ def removed_trace(directory: Path) -> Trace:
     return load(directory)
 
 
+def code_trace(directory: Path, root: Path) -> Trace:
+    """One step whose CodeRef names a file under ``root``."""
+    source = root / "src" / "passes" / "opt" / "opt.c"
+    source.parent.mkdir(parents=True)
+    source.write_text("int one;\nint two;\n", encoding="utf-8")
+    step = Step(
+        id="s0001",
+        parent=None,
+        level=1,
+        title="opt",
+        anchor="pass:opt",
+        code=[
+            CodeRef(
+                file="src/passes/opt/opt.c", line=2, end_line=2, function="opt"
+            )
+        ],
+    )
+    return Trace(directory, make_manifest(), [step])
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
 class PaneTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -298,6 +318,42 @@ class PaneTest(unittest.TestCase):
                 pane.show(trace.steps[0], trace)
         self.assertTrue(pane.has_graph())
         self.assertFalse(pane.tabs.isTabVisible(pane.tabs.indexOf(pane.node_table)))
+
+    def test_code_root_setting(self) -> None:
+        """The app setting is read from QSettings and only kept when it names a directory."""
+        from PySide6.QtCore import QSettings
+
+        from verdandi.gui.app import code_root_setting
+
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = QSettings(
+                str(Path(tmp) / "settings.ini"), QSettings.Format.IniFormat
+            )
+            self.assertIsNone(code_root_setting(settings))
+            root = Path(tmp) / "odin3"
+            root.mkdir()
+            settings.setValue("codeRoot", str(root))
+            self.assertEqual(code_root_setting(settings), root)
+            settings.setValue("codeRoot", str(Path(tmp) / "gone"))
+            self.assertIsNone(code_root_setting(settings))
+
+    def test_mainwindow_code_root(self) -> None:
+        """The window passes the code root setting through to the Code pane."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.mainwindow import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            trace = code_trace(Path(tmp) / "trace", root)
+            window = MainWindow(trace, code_root=root)
+            self.addCleanup(window.close)
+            code = window.panes["Code"]
+            assert hasattr(code, "tabs")
+            widget = code.tabs.widget(0)
+            self.assertIsInstance(widget, QPlainTextEdit)
+            assert isinstance(widget, QPlainTextEdit)
+            self.assertIn("int two;", widget.toPlainText())
 
     def test_explain_fallback_order(self) -> None:
         from verdandi.gui.explainpane import ExplainPane

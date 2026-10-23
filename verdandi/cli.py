@@ -95,8 +95,14 @@ def _info(args: argparse.Namespace) -> int:
 
 
 def _odin3_root(argument: Path | None) -> Path | None:
-    """The source tree to check against: ``--odin3-root``, else $ODIN3_ROOT when it is a dir."""
+    """The source tree to check against: ``--odin3-root``, else $ODIN3_ROOT when it is a dir.
+
+    An explicit ``--odin3-root`` that is not a directory raises ValueError: falling back to no
+    tree would silently leave every ``func:`` and ``rule:`` anchor unchecked.
+    """
     if argument is not None:
+        if not argument.is_dir():
+            raise ValueError(f"{argument}: not a source tree")
         return argument
     value = os.environ.get("ODIN3_ROOT")
     if value:
@@ -121,12 +127,13 @@ def _check_notes(args: argparse.Namespace) -> int:
     directory = args.notes if args.notes is not None else shipped_dir()
     try:
         notes = load_notes(directory)
+        root = _odin3_root(args.odin3_root)
         titles = set(stage_map()[1].values())
         passes = _registered_passes()
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"verdandi check-notes: {exc}", file=sys.stderr)
         return 2
-    locator = Locator(_odin3_root(args.odin3_root))
+    locator = Locator(root)
     anchors = stale(notes, passes, locator, titles)
     for anchor in anchors:
         print(f"{anchor}: stale")

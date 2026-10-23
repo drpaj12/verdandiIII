@@ -125,6 +125,22 @@ class NoteLoadTest(unittest.TestCase):
 
 
 class CheckNotesCliTest(unittest.TestCase):
+    @unittest.skipUnless(HAVE_ODIN3, "needs odin3")
+    def test_cli_bad_odin3_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "notes"
+            directory.mkdir()
+            write_note(directory, "proc.md", "anchor: pass:proc\n\nprocesses.\n")
+            for bad in (Path(tmp) / "no-such-tree", directory / "proc.md"):
+                with self.subTest(bad=bad.name):
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err):
+                        code = main(
+                            ["check-notes", "--odin3-root", str(bad), "--notes", str(directory)]
+                        )
+                    self.assertEqual(code, 2, err.getvalue())
+                    self.assertIn(str(bad), err.getvalue())
+
     @unittest.skipUnless(HAVE_ODIN3 and ODIN3_ROOT is not None, "needs odin3 and ODIN3_ROOT")
     def test_cli_check_notes(self) -> None:
         out = io.StringIO()

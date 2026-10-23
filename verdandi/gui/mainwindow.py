@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeyEvent, QStandardItem, QStandardItemModel
+from PySide6.QtGui import QBrush, QKeyEvent, QStandardItem, QStandardItemModel
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDockWidget,
@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         self.matches: list[Step] = []
         self.match_index = 0
         self.match_name = ""
+        self.marked: str | None = None
         self._build()
         self._build_menus()
         self._refresh()
@@ -167,6 +168,24 @@ class MainWindow(QMainWindow):
             parent = parent.parent()
         if self.model.hasChildren(index):
             self.tree.expand(index)
+        self._mark_current(step.id)
+
+    def _mark_current(self, step_id: str) -> None:
+        """Highlight the walk position as item data; the tree stays NoSelection and NoFocus.
+
+        A current-item highlight needs selection and focus, which the display-only tree
+        refuses, so the row carries the palette highlight colours itself instead.
+        """
+        if self.marked is not None and self.marked != step_id:
+            previous = self.items[self.marked]
+            previous.setData(None, Qt.ItemDataRole.BackgroundRole)
+            previous.setData(None, Qt.ItemDataRole.ForegroundRole)
+        item = self.items[step_id]
+        item.setData(QBrush(self.palette().highlight()), Qt.ItemDataRole.BackgroundRole)
+        item.setData(
+            QBrush(self.palette().highlightedText()), Qt.ItemDataRole.ForegroundRole
+        )
+        self.marked = step_id
 
     def _root_of(self, step: Step) -> Step:
         while step.parent is not None:

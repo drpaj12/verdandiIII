@@ -86,6 +86,34 @@ class GuiSmokeTest(unittest.TestCase):
         )
         self.assertEqual(window.navigator.current().id, "s0008")
 
+    def test_tree_marks_the_current_step_without_focus(self) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QAbstractItemView, QApplication
+
+        from verdandi.gui.mainwindow import MainWindow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = make_trace(Path(tmp) / "trace")
+            window = MainWindow(trace)
+            self.addCleanup(window.close)
+            window.show()
+            QApplication.processEvents()
+            first = window.items["s0001"]
+            self.assertIsNotNone(first.data(Qt.ItemDataRole.BackgroundRole))
+            self.assertIsNone(window.items["s0004"].data(Qt.ItemDataRole.BackgroundRole))
+            QTest.keyClick(QApplication.focusWidget() or window, Qt.Key.Key_N)
+            self.assertEqual(window.navigator.current().id, "s0004")
+            self.assertIsNone(first.data(Qt.ItemDataRole.BackgroundRole))
+            self.assertIsNotNone(
+                window.items["s0004"].data(Qt.ItemDataRole.BackgroundRole)
+            )
+            self.assertEqual(
+                window.tree.selectionMode(), QAbstractItemView.SelectionMode.NoSelection
+            )
+            self.assertEqual(window.tree.focusPolicy(), Qt.FocusPolicy.NoFocus)
+            self.assertIsNot(QApplication.focusWidget(), window.tree)
+
     def test_ctrl_f_cycles_through_matches(self) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtTest import QTest

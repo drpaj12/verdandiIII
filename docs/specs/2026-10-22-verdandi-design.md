@@ -195,3 +195,39 @@ tree and on the real `ODIN3_ROOT` (skipped when absent); player smoke test offsc
 Lessons cut from playthroughs; trace points inside Odin III (a core change, Peter reviews); the VPR
 stages (pack, place, route, with floorplan pictures); a Wyrd III Tools menu entry; adapters for other
 programs; a web player for the docs site.
+
+## 13. Visualization update (2026-10-23)
+
+Peter reviewed a playthrough ("yes to all" D1-D9, brief `verdandi-viz-update.md`). These decisions
+change the player, not the trace format: the snapshot already carries the nets and the AST. D1
+(per-module playthroughs) shipped in V1; this section records D2-D4, the graph pane.
+
+- **D2. Nets in the graph.** The Data pane's graph draws every net as an edge carrying a label.
+  The core reports no net name on the recorded playthrough trace (every net record's name and
+  aliases are empty, ports included; most nodes are unnamed too), so the fallback is qualified
+  and traceable: a net whose source span covers an AST DECLARATOR or INSTANCE is labelled
+  `<name> [<module>:<id>]`, and any other net `net <module>:<id>`; no edge is blank and no two
+  unnamed nets share a label. Real net names need the recorder or the core to report the
+  library's name and aliases (a core or recorder change, out of scope here; the trace format
+  already has the room), not a player change. A "net names" checkbox hides and shows the edge
+  labels. The Nets table shows the same (empty) names; the graph's fallbacks keep every edge
+  legible.
+- **D3. Which structure is shown.** The Data pane carries an explicit structure badge for the
+  current step: "IR after <pass or stage> (netlist)" for an IR snapshot (a stage-anchored step
+  names its stage), "AST (parsed)" or "AST (elaborated)" for an AST snapshot, "ABC network
+  (picture)" for an ABC picture (with "ABC network: dot not available" beside the badge when the
+  picture cannot be rendered), "symbol table" while the symbol table tab is visible, and
+  "log event (no snapshot)" for a step without a snapshot. The badge follows the visible
+  structure only: a hidden symbol table never names the badge. The symbol table becomes a shown
+  structure: a table of scope (module), name, declaration and uses derived from the AST snapshot
+  (a DECLARATOR or INSTANCE node declares a name, an IDENT node uses it), for the parse and
+  elaborate steps. IR and PROC steps keep the IR view. A `$proc`'s RTLIL body is not part of a
+  snapshot (section 5): the recorder's PROC-kind filter drops it, not only the size guard, so no
+  per-node expand exists and none is added; showing the body needs a recorder change, out of
+  scope here.
+- **D4. The diff in colour.** The step diff is drawn on the IR graph as well as in the +/- log:
+  an added node is solid green, a changed node amber, and a removed object a dashed red outline
+  (a removed node or net has no place in the after snapshot, so it is drawn as its own node,
+  labelled "removed <kind> <name or qualified id>" so it cannot be mistaken for a live edge
+  label). An added or changed net colours its edge the same way. The +/- log stays as its own
+  dock (the secondary view); the graph adds the spatial picture.

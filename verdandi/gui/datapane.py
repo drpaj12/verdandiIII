@@ -1,9 +1,17 @@
-"""The Data pane: snapshot tables, an AST tree and the dot-rendered touched slice.
+"""The Data pane: snapshot tables, an AST tree, a symbol table and the dot-rendered slice.
 
 An IR step shows the touched nodes and nets in tables (the "all objects" box shows everything)
-and, when Graphviz is on PATH, a picture of the slice. An AST step shows its tree. A step with
-an ABC picture renders that instead. Without ``dot`` the pane keeps its tables and shows no
-picture, and never raises.
+and, when Graphviz is on PATH, a picture of the slice whose edges carry the net labels. An AST
+step shows its tree and the symbol table derived from it. A step with an ABC picture renders
+that instead; without ``dot`` the badge stays "ABC network (picture)" and a note beside it says
+the picture is unavailable. A structure badge names what the pane shows: "IR after <pass or
+stage> (netlist)", "AST (parsed)" / "AST (elaborated)", "ABC network (picture)", "symbol table"
+while that tab is visible, or "log event (no snapshot)". A re-render (a new step or a checkbox)
+keeps the tab the user chose when that tab still shows, and never forces a tab on a toggle.
+
+The graph's net labels come from the core's net name when it reports one; on the recorded
+playthrough trace it reports none, so label derivation falls back to the AST (see
+``verdandi.graph``).
 """
 
 from __future__ import annotations
@@ -18,6 +26,8 @@ from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QHBoxLayout,
+    QLabel,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -28,10 +38,25 @@ from PySide6.QtWidgets import (
 )
 
 from verdandi.graph import slice_dot
+from verdandi.gui.explainpane import pass_name
+from verdandi.symtab import symbol_rows
 from verdandi.trace import Diff, Step, Trace
 
 NODE_HEADERS = ("ID", "Name", "Type", "Params")
 NET_HEADERS = ("ID", "Name", "Drivers", "Sinks")
+SYMBOL_HEADERS = ("Module", "Name", "Declaration", "Uses")
+NO_STRUCTURE = "log event (no snapshot)"
+
+
+def structure_name(step: Step, snapshot: dict[str, Any]) -> str:
+    """The badge naming the structure the step's snapshot shows (D3)."""
+    kind = snapshot.get("kind")
+    if kind == "ast":
+        form = str(snapshot.get("form", "")).lower()
+        return f"AST ({form})" if form else "AST"
+    if kind == "ir":
+        return f"IR after {pass_name(step.anchor) or step.title} (netlist)"
+    return f"unknown structure ({kind})"
 
 
 def render_dot(dot_text: str) -> bytes | None:
@@ -80,16 +105,31 @@ def _set_row(table: QTableWidget, values: tuple[Any, ...]) -> None:
 
 
 class DataPane:
-    """The step's snapshot: nodes and nets tables, AST tree, graph picture."""
+    """The step's snapshot: nodes and nets tables, AST tree, symbol table, graph picture."""
 
     def __init__(self) -> None:
         self.widget = QWidget()
+        self.badge = QLabel()
+        self.badge.setObjectName("structure-badge")
+        self.badge.setWordWrap(True)
+        self.note = QLabel()
+        self.note.setObjectName("structure-note")
+        self.note.setWordWrap(True)
+        self.note.setVisible(False)
         self.all_box = QCheckBox("all objects")
+        self.net_names_box = QCheckBox("net names")
+        self.net_names_box.setChecked(True)
+        controls = QWidget()
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.addWidget(self.all_box)
+        controls_layout.addWidget(self.net_names_box)
         self.tabs = QTabWidget()
         self.node_table = _table(NODE_HEADERS)
         self.net_table = _table(NET_HEADERS)
         self.ast_tree = QTreeWidget()
         self.ast_tree.setHeaderLabel("AST")
+        self.symbol_table = _table(SYMBOL_HEADERS)
         self.svg = QSvgWidget()
         self._graph_page = QWidget()
         graph_layout = QVBoxLayout(self._graph_page)
@@ -98,13 +138,19 @@ class DataPane:
         self.tabs.addTab(self.node_table, "Nodes")
         self.tabs.addTab(self.net_table, "Nets")
         self.tabs.addTab(self.ast_tree, "AST")
+        self.tabs.addTab(self.symbol_table, "Symbols")
         self.tabs.addTab(self._graph_page, "Graph")
         layout = QVBoxLayout(self.widget)
-        layout.addWidget(self.all_box)
+        layout.addWidget(self.badge)
+        layout.addWidget(self.note)
+        layout.addWidget(controls)
         layout.addWidget(self.tabs, 1)
         self._step: Step | None = None
         self._trace: Trace | None = None
+        self._structure = NO_STRUCTURE
         self.all_box.toggled.connect(self._rerender)
+        self.net_names_box.toggled.connect(self._rerender)
+        self.tabs.currentChanged.connect(self._sync_badge)
 
     def show(self, step: Step, trace: Trace) -> None:
         self._step = step
@@ -121,28 +167,79 @@ class DataPane:
     def _render(self) -> None:
         if self._step is None or self._trace is None:
             return
+        previous = self.tabs.currentWidget()
         self.node_table.setRowCount(0)
         self.net_table.setRowCount(0)
         self.ast_tree.clear()
-        self._set_tabs(nodes=True, nets=True, ast=False, graph=False)
+        self.symbol_table.setRowCount(0)
+        self.note.clear()
+        self.note.setVisible(False)
+        self._set_tabs(nodes=False, nets=False, ast=False, symbols=False, graph=False)
+        self._structure = NO_STRUCTURE
+        default: QWidget | None = None
         if self._step.picture is not None:
-            self._render_picture(self._step.picture)
+            self._structure = "ABC network (picture)"
+            if self._render_picture(self._step.picture):
+                self._set_tabs(nodes=False, nets=False, ast=False, symbols=False, graph=True)
+                default = self._graph_page
+            else:
+                self.note.setText(
+                    "ABC network: dot not available"
+                    if which("dot") is None
+                    else "ABC network: picture could not be rendered"
+                )
+                self.note.setVisible(True)
         snapshot = self._trace.snapshot(self._step)
         if snapshot is None:
+            self._select_tab(previous, default)
+            self._sync_badge()
             return
         kind = snapshot.get("kind")
         if kind == "ir":
+            self._structure = structure_name(self._step, snapshot)
             self._fill_tables(snapshot, self._step.diff)
-            self._render_slice(snapshot, self._step.diff)
+            graph = self._render_slice(snapshot, self._step.diff)
+            self._set_tabs(nodes=True, nets=True, ast=False, symbols=False, graph=graph)
+            default = self.node_table
         elif kind == "ast":
-            self._set_tabs(nodes=False, nets=False, ast=True, graph=False)
+            self._structure = structure_name(self._step, snapshot)
             self._fill_ast(snapshot)
+            self._fill_symbols(snapshot)
+            self._set_tabs(nodes=False, nets=False, ast=True, symbols=True, graph=False)
+            default = self.ast_tree
+        self._select_tab(previous, default)
+        self._sync_badge()
 
-    def _set_tabs(self, *, nodes: bool, nets: bool, ast: bool, graph: bool) -> None:
+    def _select_tab(self, previous: QWidget | None, default: QWidget | None) -> None:
+        """Keep the tab the user was on when it still shows; else the step kind's default.
+
+        A re-render happens on every step change and on each checkbox toggle, so forcing a tab
+        here would bounce the user off Graph or Symbols and hide the toggle's effect.
+        """
+        if previous is not None:
+            index = self.tabs.indexOf(previous)
+            if index >= 0 and self.tabs.isTabVisible(index):
+                self.tabs.setCurrentWidget(previous)
+                return
+        if default is not None:
+            self.tabs.setCurrentWidget(default)
+
+    def _sync_badge(self, _index: int = -1) -> None:
+        """The badge names the structure shown; a visible symbol table names itself (D3)."""
+        index = self.tabs.indexOf(self.symbol_table)
+        if self.tabs.currentWidget() is self.symbol_table and self.tabs.isTabVisible(index):
+            self.badge.setText("symbol table")
+        else:
+            self.badge.setText(self._structure)
+
+    def _set_tabs(
+        self, *, nodes: bool, nets: bool, ast: bool, symbols: bool, graph: bool
+    ) -> None:
         for page, visible in (
             (self.node_table, nodes),
             (self.net_table, nets),
             (self.ast_tree, ast),
+            (self.symbol_table, symbols),
             (self._graph_page, graph),
         ):
             self.tabs.setTabVisible(self.tabs.indexOf(page), visible)
@@ -183,23 +280,60 @@ class DataPane:
             for child in reversed(node.get("children", [])):
                 stack.append((child, item))
 
-    def _render_slice(self, snapshot: dict[str, Any], diff: Diff | None) -> None:
-        if diff is None or not (diff.added or diff.removed or diff.changed):
-            return
-        svg = render_dot(slice_dot(snapshot, diff))
-        if svg is None:
-            return
-        self.svg.load(QByteArray(svg))
-        self._set_tabs(nodes=True, nets=True, ast=False, graph=True)
+    def _fill_symbols(self, snapshot: dict[str, Any]) -> None:
+        for symbol in symbol_rows(snapshot):
+            uses = "; ".join(symbol.uses) if symbol.uses else "-"
+            _set_row(
+                self.symbol_table,
+                (symbol.module, symbol.name, symbol.declaration, uses),
+            )
 
-    def _render_picture(self, name: str) -> None:
+    def _render_slice(self, snapshot: dict[str, Any], diff: Diff | None) -> bool:
+        """Load the slice picture; True when the Graph tab holds one."""
+        if diff is None or not (diff.added or diff.removed or diff.changed):
+            return False
+        svg = render_dot(
+            slice_dot(
+                snapshot,
+                diff,
+                show_net_names=self.net_names_box.isChecked(),
+                ast=self._ast_snapshot(),
+            )
+        )
+        if svg is None:
+            return False
+        self.svg.load(QByteArray(svg))
+        return True
+
+    def _ast_snapshot(self) -> dict[str, Any] | None:
+        """An AST snapshot of this trace, for net display names; None when it has none.
+
+        The newest elaborated AST store wins over the parsed one; both carry the module and
+        declaration locations the graph matches against a net's source span.
+        """
         if self._trace is None:
-            return
+            return None
+        found: dict[str, Any] | None = None
+        for step in self._trace.steps:
+            if step.snapshot is None:
+                continue
+            snapshot = self._trace.snapshot(step)
+            if snapshot is None or snapshot.get("kind") != "ast":
+                continue
+            found = snapshot
+            if snapshot.get("form") == "ELABORATED":
+                break
+        return found
+
+    def _render_picture(self, name: str) -> bool:
+        """Load an ABC picture; True when the Graph tab holds one."""
+        if self._trace is None:
+            return False
         path = self._trace.directory / "pic" / name
         if not path.is_file():
-            return
+            return False
         svg = render_dot(path.read_text(encoding="utf-8"))
         if svg is None:
-            return
+            return False
         self.svg.load(QByteArray(svg))
-        self._set_tabs(nodes=False, nets=False, ast=False, graph=True)
+        return True

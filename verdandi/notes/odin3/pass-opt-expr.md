@@ -11,5 +11,6 @@ to each the first rule of its type that fires. `-keepdc` keeps don't-care values
 why `proc`'s trailing call passes it.
 
 What to look for: each fired rule is a DEBUG line, so the step's L3 children read
-`opt_expr: module '<m>': <rule> on <type> '<cell>'` and the Code pane opens the rule's source
-line. The summary counts the cells rewritten and folded.
+`opt_expr: module '<m>': <rule> on <type> '<cell>'` and the Code pane opens the DEBUG log call
+that produced the line, not the rule's implementation. The summary counts the cells rewritten
+and folded.

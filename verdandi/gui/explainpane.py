@@ -74,7 +74,7 @@ class ExplainPane:
         if self._notes is None:
             try:
                 self._notes = load_notes(shipped_dir())
-            except ValueError:
+            except (OSError, ValueError):
                 self._notes = {}
         return self._notes
 

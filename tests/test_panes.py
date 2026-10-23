@@ -429,6 +429,14 @@ class PaneTest(unittest.TestCase):
             self.assertIn("opt: 1 added, 0 removed, 0 changed", text)
             self.assertIn("merged cell _1_", text)
 
+    def test_explain_unreadable_notes(self) -> None:
+        """An unreadable note file leaves the pane with no notes instead of raising."""
+        from verdandi.gui import explainpane
+
+        with mock.patch.object(explainpane, "load_notes", side_effect=OSError("denied")):
+            pane = explainpane.ExplainPane()
+            self.assertEqual(pane.notes(), {})
+
     def test_graph_without_dot(self) -> None:
         from verdandi.gui import datapane
 

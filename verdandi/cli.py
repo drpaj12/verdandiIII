@@ -153,10 +153,11 @@ def _play(args: argparse.Namespace) -> int:
         return 2
     try:
         from verdandi.gui.app import player
+
+        return player(trace)
     except ImportError as exc:
         print(f"verdandi play: the player needs PySide6 ({exc})", file=sys.stderr)
         return 2
-    return player(trace)
 
 
 def main(argv: list[str] | None = None) -> int:

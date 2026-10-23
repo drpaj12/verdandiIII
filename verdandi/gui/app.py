@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication, QFileDialog
-
-from verdandi.gui.mainwindow import MainWindow
 from verdandi.trace import Trace, load
+
+if TYPE_CHECKING:
+    from PySide6.QtCore import QSettings
+
+GUI_HINT = 'pip install "verdandi[gui]"'
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -20,7 +22,15 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def player(trace: Trace) -> int:
-    """Show the player for a loaded trace; reuse a QApplication when one exists."""
+    """Show the player for a loaded trace; reuse a QApplication when one exists.
+
+    Qt is imported here, not at module load, so ``verdandi play`` can report a missing
+    gui extra with its own clean message.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    from verdandi.gui.mainwindow import MainWindow
+
     existing = QApplication.instance()
     app = existing if isinstance(existing, QApplication) else QApplication(sys.argv[:1])
     window = MainWindow(trace)
@@ -29,6 +39,8 @@ def player(trace: Trace) -> int:
 
 
 def _choose(settings: QSettings) -> Path | None:
+    from PySide6.QtWidgets import QFileDialog
+
     last = settings.value("lastTrace")
     if isinstance(last, str) and (Path(last) / "manifest.json").is_file():
         return Path(last)
@@ -46,6 +58,17 @@ def _load(directory: Path) -> Trace | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        from PySide6.QtCore import QSettings
+        from PySide6.QtWidgets import QApplication
+
+        from verdandi.gui.mainwindow import MainWindow
+    except ImportError as exc:
+        print(
+            f"verdandi-gui: the player needs PySide6 ({exc}); {GUI_HINT}",
+            file=sys.stderr,
+        )
+        return 2
     app = QApplication(sys.argv[:1])
     settings = QSettings("verdandi", "verdandi-gui")
     directory = Path(args.trace) if args.trace else _choose(settings)

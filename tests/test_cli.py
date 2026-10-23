@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,8 @@ from typing import Any
 
 from verdandi.cli import main
 from verdandi.trace import FORMAT_VERSION, Manifest, Step, save
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def make_manifest() -> Manifest:
@@ -91,6 +95,26 @@ class CliTest(unittest.TestCase):
             self.assertIn("verdandi play:", stderr.getvalue())
             self.assertIn("no steps", stderr.getvalue())
 
+
+    def test_gui_without_pyside6_is_a_clean_error(self) -> None:
+        code = (
+            "import sys\n"
+            "for name in ('PySide6', 'PySide6.QtCore', 'PySide6.QtWidgets'):\n"
+            "    sys.modules[name] = None\n"
+            "from verdandi.gui.app import main\n"
+            "raise SystemExit(main(['/nonexistent/verdandi-trace']))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("verdandi-gui:", result.stderr)
+        self.assertIn('pip install "verdandi[gui]"', result.stderr)
 
     def test_info_valid_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

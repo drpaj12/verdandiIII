@@ -19,7 +19,7 @@ Without a VTR checkout, use the LPM tech library instead (`hardmap` is then omit
       --techlib "$ODIN3_ROOT/lib/lpm.o3lib" -o examples/counter/trace
 
 `verdandi play examples/counter/trace` walks it. What to look for: `proc` turns the `always`
-block into a `$dff`, a `$mux` and a `$add` (five sub-steps), `opt_dff` folds the synchronous
+block into a `$dff` and a `$mux` (five sub-steps), `opt_dff` folds the synchronous
 reset into a `$sdff`, `hardmap` turns the add into an adder chain, `lower` splits the `$sdff`
 into two flip-flops and two reset multiplexers, and ABC maps the two bits of next-state logic
 to two 6-input LUTs. The notes beside this file

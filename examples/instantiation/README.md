@@ -27,8 +27,9 @@ Without a VTR checkout, use the LPM tech library instead (`hardmap` is then omit
       --techlib "$ODIN3_ROOT/lib/lpm.o3lib" -o examples/instantiation/trace
 
 `verdandi play examples/instantiation/trace` walks it. The trace shows the instantiations at
-three points: the Parse and Elaborate steps (the AST keeps one `INSTANTIATION` node per
-module type, with its `INSTANCE` and `CONNECTION` children), the `hierarchy` step log (the top
+three points: the Parse and Elaborate steps (each use is an `INSTANTIATION` node with its
+`INSTANCE` and `CONNECTION` children; at Parse both counter uses are named `counter`, and
+Elaborate resolves the second to `counter$WIDTH=4`), the `hierarchy` step log (the top
 is the one module no other module instantiates), and the `flatten` step log (three instances
 expanded, `counter`, `counter$WIDTH=4` and `and_gate` now uninstantiated). The notes beside
 this file explain those steps; the other examples are listed in `examples/counter/README.md`.

@@ -95,11 +95,34 @@ class ExampleLayoutTest(unittest.TestCase):
         script = EXAMPLES / "record-all.sh"
         self.assertTrue(script.is_file(), f"{script} is missing")
         text = script.read_text(encoding="utf-8")
-        positions = [text.index(f"{name}/{source}") for name, source, _top in EXAMPLE_SET]
-        self.assertEqual(positions, sorted(positions), "record-all.sh is not smallest first")
+        entries = self.array_entries(text)
+        self.assertEqual(
+            entries,
+            [(name, top, f"{name}/{source}") for name, source, top in EXAMPLE_SET],
+            "record-all.sh does not list every example once, smallest first, uncommented",
+        )
         self.assertIn("--arch", text, "record-all.sh never uses the k6 arch")
         self.assertIn("--techlib", text, "record-all.sh has no LPM fallback")
         self.assertIn("check-notes", text, "record-all.sh does not check the example notes")
+
+    def array_entries(self, text: str) -> list[tuple[str, str, str]]:
+        """The (name, top, source) entries of the script's `examples=(...)` array, comments out."""
+        lines = text.splitlines()
+        start = next(
+            (index for index, line in enumerate(lines) if line.strip() == "examples=("), None
+        )
+        self.assertIsNotNone(start, "record-all.sh has no examples array")
+        assert start is not None
+        entries: list[tuple[str, str, str]] = []
+        for line in lines[start + 1 :]:
+            stripped = line.strip()
+            if stripped == ")":
+                return entries
+            if not stripped or stripped.startswith("#"):
+                continue
+            name, top, source = stripped.strip('"').split()
+            entries.append((name, top, source))
+        self.fail("record-all.sh's examples array is not closed")
 
 
 @unittest.skipUnless(HAVE_ODIN3, "needs odin3")
@@ -147,9 +170,13 @@ class ExampleRecordTest(unittest.TestCase):
             {instance for _module, instance in instances}, {"two", "four", "gate"}
         )
         counter_types = {
-            module for module, instance in instances if instance in ("two", "four")
+            (module, instance) for module, instance in instances if instance in ("two", "four")
         }
-        self.assertEqual(len(counter_types), 2, "the two counter instances share one width")
+        self.assertEqual(
+            counter_types,
+            {("counter", "two"), ("counter$WIDTH=4", "four")},
+            "the counter instances do not map to their expected widths",
+        )
         self.assertEqual(
             [module for module, instance in instances if instance == "gate"], ["and_gate"]
         )

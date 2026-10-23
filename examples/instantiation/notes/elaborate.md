@@ -6,5 +6,6 @@ each module type resolved. Its `INSTANTIATION` nodes name the module types (`cou
 port `CONNECTION`s.
 
 The width override is why two counters appear as two types: the default parameter set keeps
-the name `counter`, and the changed one gets the `$WIDTH=4` suffix. Elaboration creates that
-specialised module once, not once per instance, so both instances share it.
+the name `counter`, and the changed one gets the `$WIDTH=4` suffix. Elaboration creates the
+specialised module once; the `two` instance still uses `counter`, and only `four` uses
+`counter$WIDTH=4`.

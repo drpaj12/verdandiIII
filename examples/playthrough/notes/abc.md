@@ -1,9 +1,11 @@
 anchor: abc:if
 
-The whole playthrough maps to 12 LUTs plus its flip-flops: the counter takes 2, the register's
-four bits 4, and the flat top's remaining soft logic 6. `if -K 6 -v` is the step that turns
-the AIG into those 6-input LUTs.
+The trace maps 12 LUTs in all, but only 6 are live. The flat top's 6 LUTs are the copies of
+the counter (2) and the register (4); the 2 and 4 LUTs in the `counter2` and `ifelse_reg`
+module lines are the same logic again, in the modules the top no longer instantiates. So the
+live design is 6 LUTs and 6 flip-flops, and the other 6 LUTs are dead copies.
 
 The counter and register examples record their own module alone, so their ABC LUT counts are
-the same 2 and 4. Mapping the top's leftover logic is what the combined example adds; the
-hard-mapped multiplier contributes no LUTs at all.
+the same 2 and 4. Mapping the top adds no new logic: the hard-mapped multiplier contributes
+no LUTs (`mul4` has nothing to map). `if -K 6 -v` is the step that turns the AIG into
+6-input LUTs.

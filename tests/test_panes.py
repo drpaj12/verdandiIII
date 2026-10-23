@@ -145,6 +145,62 @@ def picture_trace(directory: Path) -> Trace:
     return load(directory)
 
 
+def removed_trace(directory: Path) -> Trace:
+    """Two steps: the first holds a net the second's diff removes."""
+    sources = write_sources(directory.parent)
+    before = ir_snapshot(
+        [
+            {
+                "name": "m",
+                "nodes": [],
+                "nets": [
+                    {
+                        "id": 10,
+                        "name": "alpha",
+                        "drivers": [],
+                        "sinks": [],
+                        "sources": [["crlf.v", 2, 8, 2, 13]],
+                    }
+                ],
+                "wires": [],
+            }
+        ]
+    )
+    after = ir_snapshot([{"name": "m", "nodes": [], "nets": [], "wires": []}])
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=1,
+            title="read_verilog",
+            anchor="pass:read_verilog",
+            snapshot="s0001.json",
+        ),
+        Step(
+            id="s0002",
+            parent=None,
+            level=1,
+            title="opt",
+            anchor="pass:opt",
+            snapshot="s0002.json",
+            diff=Diff(
+                added=[],
+                removed=[ObjRef("m", "net", 10, "alpha")],
+                changed=[],
+                by_name=False,
+            ),
+        ),
+    ]
+    save(
+        directory,
+        make_manifest(),
+        steps,
+        {"s0001.json": before, "s0002.json": after},
+        sources,
+    )
+    return load(directory)
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
 class PaneTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -171,6 +227,21 @@ class PaneTest(unittest.TestCase):
             pane = VerilogPane()
             pane.show(trace.steps[0], trace)
             self.assertEqual(pane.highlighted_texts(), ["alpha", "beta"])
+
+    def test_highlight_removed_span(self) -> None:
+        """A removed object's spans come from the nearest earlier snapshot, in their own colour."""
+        from verdandi.gui.verilogpane import REMOVED_HIGHLIGHT, VerilogPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = removed_trace(Path(tmp) / "trace")
+            pane = VerilogPane()
+            pane.show(trace.steps[1], trace)
+            self.assertEqual(pane.highlighted_texts(), ["alpha"])
+            colours = [
+                selection.format.background().color().name()
+                for selection in pane.editors["crlf.v"].extraSelections()
+            ]
+        self.assertEqual(colours, [REMOVED_HIGHLIGHT.name()])
 
     def test_code_missing_file(self) -> None:
         from PySide6.QtWidgets import QPlainTextEdit

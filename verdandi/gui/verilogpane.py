@@ -20,6 +20,7 @@ from verdandi.trace import Diff, Step, Trace
 
 HIGHLIGHT = QColor("#fff3b0")
 HIGHLIGHT_TEXT = QColor("#000000")
+REMOVED_HIGHLIGHT = QColor("#ffd6d6")
 
 
 def normalize_text(text: str) -> str:
@@ -82,16 +83,12 @@ def span_text(text: str, span: Any) -> str:
     return text[start:end]
 
 
-def source_spans(snapshot: dict[str, Any] | None, diff: Diff | None) -> list[list[Any]]:
-    """Every source row of the diff's objects that the snapshot still holds.
-
-    A removed object is absent from the current snapshot, so its spans cannot be shown; wires
-    carry no sources in an IR snapshot.
-    """
-    if snapshot is None or diff is None or snapshot.get("kind") != "ir":
+def _span_rows(snapshot: dict[str, Any] | None, refs: list[Any]) -> list[list[Any]]:
+    """The source rows of ``refs`` that the IR snapshot holds; wires carry none."""
+    if snapshot is None or snapshot.get("kind") != "ir":
         return []
     wanted: dict[tuple[str, str], set[int]] = {}
-    for ref in (*diff.added, *diff.removed, *diff.changed):
+    for ref in refs:
         wanted.setdefault((ref.module, ref.kind), set()).add(ref.id)
     spans: list[list[Any]] = []
     for module in snapshot.get("modules", []):
@@ -104,6 +101,24 @@ def source_spans(snapshot: dict[str, Any] | None, diff: Diff | None) -> list[lis
                 if int(item["id"]) in ids:
                     spans.extend(item.get("sources", []))
     return spans
+
+
+def source_spans(snapshot: dict[str, Any] | None, diff: Diff | None) -> list[list[Any]]:
+    """Every source row of the diff's added, removed and changed objects the snapshot holds.
+
+    A removed object is absent from the snapshot a step ends with, so its spans usually come
+    from earlier in the walk; ``removed_spans`` resolves them there.
+    """
+    if diff is None:
+        return []
+    return _span_rows(snapshot, [*diff.added, *diff.removed, *diff.changed])
+
+
+def removed_spans(snapshot: dict[str, Any] | None, diff: Diff | None) -> list[list[Any]]:
+    """The source rows of the diff's removed objects in an earlier snapshot."""
+    if diff is None:
+        return []
+    return _span_rows(snapshot, list(diff.removed))
 
 
 class VerilogPane:
@@ -156,29 +171,55 @@ class VerilogPane:
             return None
         return base, editor
 
+    def _mark(self, target: QPlainTextEdit, span: Any, colour: QColor) -> bool:
+        """Highlight one row in one editor; False when it names no line of the text."""
+        offsets = span_offsets(target.toPlainText(), span)
+        if offsets is None or offsets[1] <= offsets[0]:
+            return False
+        start, end = offsets
+        cursor = target.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        selection = QTextEdit.ExtraSelection()
+        selection.cursor = cursor
+        selection.format.setBackground(colour)
+        selection.format.setForeground(HIGHLIGHT_TEXT)
+        target.setExtraSelections([*target.extraSelections(), selection])
+        return True
+
+    def _earlier_snapshot(self, step: Step, trace: Trace) -> dict[str, Any] | None:
+        """The nearest IR snapshot recorded before the step; None when there is none."""
+        index = next(
+            (i for i, candidate in enumerate(trace.steps) if candidate is step), None
+        )
+        if index is None:
+            return None
+        for candidate in reversed(trace.steps[:index]):
+            snapshot = trace.snapshot(candidate)
+            if snapshot is not None and snapshot.get("kind") == "ir":
+                return snapshot
+        return None
+
     def _highlight(self, step: Step, trace: Trace) -> None:
         for editor in self.editors.values():
             editor.setExtraSelections([])
         first: str | None = None
-        for span in source_spans(trace.snapshot(step), step.diff):
+        rows = [
+            (span, HIGHLIGHT) for span in source_spans(trace.snapshot(step), step.diff)
+        ]
+        rows.extend(
+            (span, REMOVED_HIGHLIGHT)
+            for span in removed_spans(self._earlier_snapshot(step, trace), step.diff)
+        )
+        for span, colour in rows:
             if len(span) < 5:
                 continue
             found = self._target(str(span[0]))
             if found is None:
                 continue
             name, target = found
-            offsets = span_offsets(target.toPlainText(), span)
-            if offsets is None or offsets[1] <= offsets[0]:
+            if not self._mark(target, span, colour):
                 continue
-            start, end = offsets
-            cursor = target.textCursor()
-            cursor.setPosition(start)
-            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-            selection = QTextEdit.ExtraSelection()
-            selection.cursor = cursor
-            selection.format.setBackground(HIGHLIGHT)
-            selection.format.setForeground(HIGHLIGHT_TEXT)
-            target.setExtraSelections([*target.extraSelections(), selection])
             if first is None:
                 first = name
         if first is not None:

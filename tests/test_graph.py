@@ -68,8 +68,8 @@ class SliceDotTest(unittest.TestCase):
         self.assertNotIn('label="n1"', dot)
         self.assertIn('"counter2:1" -> "counter2:2"', dot)
 
-    def test_unnamed_net_labelled_by_id(self) -> None:
-        """An internal net has no name; its edge still carries net <id>."""
+    def test_unnamed_net_labelled_by_qualified_id(self) -> None:
+        """An unnamed net's edge carries net <module>:<id>, as net ids repeat per module."""
         snapshot = copy.deepcopy(SNAPSHOT)
         snapshot["modules"][0]["nets"].append(
             {"id": 12, "name": "", "drivers": [3], "sinks": [4], "sources": []}
@@ -81,7 +81,93 @@ class SliceDotTest(unittest.TestCase):
             by_name=False,
         )
         dot = slice_dot(snapshot, diff)
-        self.assertIn('"counter2:3" -> "counter2:4" [label="net 12"]', dot)
+        self.assertIn('"counter2:3" -> "counter2:4" [label="net counter2:12"]', dot)
+
+    def test_unnamed_net_named_from_the_ast(self) -> None:
+        """A declaration inside the net's source span names the net, with its qualified id."""
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["modules"][0]["nets"].append(
+            {
+                "id": 12,
+                "name": "",
+                "drivers": [3],
+                "sinks": [4],
+                "sources": [["m.v", 2, 3, 2, 12]],
+            }
+        )
+        ast: dict[str, Any] = {
+            "kind": "ast",
+            "form": "ELABORATED",
+            "roots": [
+                {
+                    "kind": "MODULE",
+                    "sub": "",
+                    "name": "counter2",
+                    "loc": "m.v:1:1",
+                    "children": [
+                        {
+                            "kind": "DECLARATOR",
+                            "sub": "",
+                            "name": "sum",
+                            "loc": "m.v:2:7",
+                            "children": [],
+                        }
+                    ],
+                }
+            ],
+        }
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 3, "c")],
+            by_name=False,
+        )
+        dot = slice_dot(snapshot, diff, ast=ast)
+        self.assertIn(
+            '"counter2:3" -> "counter2:4" [label="sum [counter2:12]"]', dot
+        )
+
+    def test_ast_name_outside_the_net_span_is_not_used(self) -> None:
+        """A declaration on another line does not name the net; the qualified fallback stays."""
+        snapshot = copy.deepcopy(SNAPSHOT)
+        snapshot["modules"][0]["nets"].append(
+            {
+                "id": 12,
+                "name": "",
+                "drivers": [3],
+                "sinks": [4],
+                "sources": [["m.v", 2, 3, 2, 12]],
+            }
+        )
+        ast: dict[str, Any] = {
+            "kind": "ast",
+            "form": "PARSED",
+            "roots": [
+                {
+                    "kind": "MODULE",
+                    "sub": "",
+                    "name": "counter2",
+                    "loc": "m.v:1:1",
+                    "children": [
+                        {
+                            "kind": "DECLARATOR",
+                            "sub": "",
+                            "name": "sum",
+                            "loc": "m.v:3:7",
+                            "children": [],
+                        }
+                    ],
+                }
+            ],
+        }
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("counter2", "node", 3, "c")],
+            by_name=False,
+        )
+        dot = slice_dot(snapshot, diff, ast=ast)
+        self.assertIn('label="net counter2:12"', dot)
 
     def test_named_nodes_fallback_to_key(self) -> None:
         """An unnamed IR node is labelled by its key, so no graph node is blank."""
@@ -139,11 +225,12 @@ class SliceDotTest(unittest.TestCase):
             by_name=False,
         )
         line = _node_line(slice_dot(SNAPSHOT, diff), "counter2:node:4")
-        self.assertIn('label="d"', line)
+        self.assertIn('label="removed node d"', line)
         self.assertIn('color="#cf222e"', line)
         self.assertIn('style="dashed"', line)
 
     def test_removed_net_is_a_dashed_red_node(self) -> None:
+        """A removed net's label is prefixed, so it cannot collide with a live edge label."""
         diff = Diff(
             added=[],
             removed=[ObjRef("counter2", "net", 11, "n2")],
@@ -151,8 +238,19 @@ class SliceDotTest(unittest.TestCase):
             by_name=False,
         )
         line = _node_line(slice_dot(SNAPSHOT, diff), "counter2:net:11")
-        self.assertIn('label="net n2"', line)
+        self.assertIn('label="removed net n2"', line)
         self.assertIn('style="dashed"', line)
+
+    def test_removed_unnamed_object_is_qualified(self) -> None:
+        """An unnamed removed object names its module-qualified id, not a bare id."""
+        diff = Diff(
+            added=[],
+            removed=[ObjRef("counter2", "net", 11, "")],
+            changed=[],
+            by_name=False,
+        )
+        line = _node_line(slice_dot(SNAPSHOT, diff), "counter2:net:11")
+        self.assertIn('label="removed net counter2:11"', line)
 
     def test_changed_net_colours_its_edge(self) -> None:
         diff = Diff(

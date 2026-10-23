@@ -128,7 +128,7 @@ def _style_badge(item: QTableWidgetItem, loc: Loc) -> None:
 
 
 def graph_targets(snapshot: dict[str, Any]) -> dict[str, Loc]:
-    """The graph's drawn nodes and their locs, keyed by SVG element id (D6)."""
+    """The snapshot's nodes and their locs, keyed by SVG element id (D6)."""
     found: dict[str, Loc] = {}
     for module in snapshot.get("modules", []):
         name = str(module.get("name", ""))

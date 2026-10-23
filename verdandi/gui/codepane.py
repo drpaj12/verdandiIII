@@ -137,7 +137,7 @@ class CodePane:
         The trace keeps its sources by basename (``src/<basename>``); a loc whose file the trace
         does not hold opens a tab that says so instead of raising.
         """
-        name = Path(loc.file).name
+        name = Path(loc.file.replace("\\", "/")).name
         path = sources / name
         editor = (
             self._whole_editor_at(path, loc)

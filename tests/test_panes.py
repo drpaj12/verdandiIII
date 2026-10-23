@@ -424,6 +424,193 @@ class PaneTest(unittest.TestCase):
                 self.assertNotIn('label="q"', dot_texts[-1])
         self.assertEqual(len(dot_texts), 2)
 
+    def test_graph_uses_ast_net_names(self) -> None:
+        """The pane finds the trace's AST snapshot and names unnamed nets from it."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        dot_texts: list[str] = []
+
+        def capture(text: str) -> bytes:
+            dot_texts.append(text)
+            return svg
+
+        ir = ir_snapshot(
+            [
+                {
+                    "name": "m",
+                    "nodes": [
+                        {
+                            "id": 1,
+                            "name": "dff",
+                            "type": "$dff",
+                            "params": {},
+                            "pins": [],
+                            "sources": [],
+                        },
+                        {
+                            "id": 2,
+                            "name": "not",
+                            "type": "$not",
+                            "params": {},
+                            "pins": [],
+                            "sources": [],
+                        },
+                    ],
+                    "nets": [
+                        {
+                            "id": 20,
+                            "name": "",
+                            "drivers": [1],
+                            "sinks": [2],
+                            "sources": [["m.v", 2, 3, 2, 12]],
+                        }
+                    ],
+                    "wires": [],
+                }
+            ]
+        )
+        ast: dict[str, Any] = {
+            "kind": "ast",
+            "form": "PARSED",
+            "roots": [
+                {
+                    "kind": "MODULE",
+                    "sub": "",
+                    "name": "m",
+                    "loc": "m.v:1:1",
+                    "children": [
+                        {
+                            "kind": "DECLARATOR",
+                            "sub": "",
+                            "name": "sum",
+                            "loc": "m.v:2:7",
+                            "children": [],
+                        }
+                    ],
+                }
+            ],
+        }
+        diff = Diff(
+            added=[],
+            removed=[],
+            changed=[ObjRef("m", "node", 1, "dff")],
+            by_name=False,
+        )
+        steps = [
+            Step(
+                id="s0001",
+                parent=None,
+                level=1,
+                title="opt",
+                anchor="pass:opt",
+                snapshot="s0001.json",
+                diff=diff,
+            ),
+            Step(
+                id="s0002",
+                parent=None,
+                level=2,
+                title="Parsed",
+                anchor="pass:read_verilog",
+                snapshot="s0002.json",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "trace"
+            save(
+                directory,
+                make_manifest(),
+                steps,
+                {"s0001.json": ir, "s0002.json": ast},
+                [],
+            )
+            trace = load(directory)
+            with mock.patch.object(datapane, "render_dot", side_effect=capture):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+        self.assertIn('label="sum [m:20]"', dot_texts[-1])
+
+    def test_render_keeps_the_users_tab(self) -> None:
+        """A toggle or a step change never moves the user off the tab they chose (review High)."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        dot_texts: list[str] = []
+
+        def capture(text: str) -> bytes:
+            dot_texts.append(text)
+            return svg
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = data_trace(Path(tmp) / "trace")
+            first = trace.steps[0]
+            second = Step(
+                id="s0002",
+                parent=None,
+                level=1,
+                title="opt",
+                anchor="pass:opt",
+                snapshot="s0001.json",
+                diff=Diff(
+                    added=[],
+                    removed=[],
+                    changed=[ObjRef("counter2", "node", 2, "b")],
+                    by_name=False,
+                ),
+            )
+            trace = Trace(trace.directory, trace.manifest, [first, second])
+            with mock.patch.object(datapane, "render_dot", side_effect=capture):
+                pane = datapane.DataPane()
+                pane.show(first, trace)
+                pane.tabs.setCurrentWidget(pane._graph_page)
+                pane.all_box.setChecked(True)
+                self.assertIs(pane.tabs.currentWidget(), pane._graph_page)
+                pane.net_names_box.setChecked(False)
+                self.assertIs(pane.tabs.currentWidget(), pane._graph_page)
+                self.assertNotIn('label="q"', dot_texts[-1])
+                pane.show(second, trace)
+                self.assertIs(pane.tabs.currentWidget(), pane._graph_page)
+
+    def test_hidden_tab_falls_back_to_the_step_default(self) -> None:
+        """A tab the new step hides gives way to that step's default tab, once."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ast = ast_trace(Path(tmp) / "ast")
+            ir = data_trace(Path(tmp) / "ir")
+            pane = DataPane()
+            pane.show(ast.steps[0], ast)
+            pane.tabs.setCurrentWidget(pane.symbol_table)
+            self.assertEqual(pane.badge.text(), "symbol table")
+            pane.show(ir.steps[0], ir)
+            self.assertIs(pane.tabs.currentWidget(), pane.node_table)
+            self.assertEqual(pane.badge.text(), "IR after opt (netlist)")
+
+    def test_badge_ignores_a_hidden_symbol_table(self) -> None:
+        """A no-snapshot step after a Symbols AST step badges the step, not the hidden table."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = ast_trace(Path(tmp) / "trace")
+            event = Step(
+                id="s0002",
+                parent=None,
+                level=3,
+                title="opt_clean: removing unused $mux '$c8'",
+                anchor="rule:opt_clean:removing_unused",
+            )
+            trace = Trace(trace.directory, trace.manifest, [trace.steps[0], event])
+            pane = DataPane()
+            pane.show(trace.steps[0], trace)
+            pane.tabs.setCurrentWidget(pane.symbol_table)
+            self.assertEqual(pane.badge.text(), "symbol table")
+            pane.show(event, trace)
+            self.assertEqual(pane.badge.text(), "log event (no snapshot)")
+            self.assertFalse(
+                pane.tabs.isTabVisible(pane.tabs.indexOf(pane.symbol_table))
+            )
+
     def test_diff_strip_still_renders(self) -> None:
         """The +/- log stays, beside the graph's colour diff: counts and the touched list."""
         from verdandi.gui.diffstrip import DiffStrip
@@ -441,7 +628,7 @@ class PaneTest(unittest.TestCase):
                 by_name=False,
             ),
         )
-        trace = Trace(Path("/tmp/claude-1000/v2-diffstrip"), make_manifest(), [step])
+        trace = Trace(Path("unused"), make_manifest(), [step])
         strip = DiffStrip()
         strip.show(step, trace)
         self.assertEqual(strip.labels["added"].text(), "+1 added")
@@ -501,11 +688,21 @@ class PaneTest(unittest.TestCase):
                 pane = datapane.DataPane()
                 pane.show(trace.steps[0], trace)
             self.assertEqual(pane.badge.text(), "ABC network (picture)")
+            self.assertTrue(pane.note.isHidden())
             with mock.patch.object(datapane, "which", return_value=None):
                 pane = datapane.DataPane()
                 pane.show(trace.steps[0], trace)
             self.assertEqual(pane.badge.text(), "ABC network (picture)")
+            self.assertEqual(pane.note.text(), "ABC network: dot not available")
+            self.assertFalse(pane.note.isHidden())
             self.assertFalse(pane.has_graph())
+            with mock.patch.object(datapane, "render_dot", return_value=None):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+            self.assertEqual(
+                pane.note.text(), "ABC network: picture could not be rendered"
+            )
+            self.assertFalse(pane.note.isHidden())
 
     def test_structure_badge_log_event(self) -> None:
         """An L3 event has no snapshot: the badge says so and no structure tab shows."""

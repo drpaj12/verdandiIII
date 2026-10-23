@@ -17,6 +17,10 @@ suite of Odin III (<https://github.com/drpaj12/odin3>), Wyrd III
 Without a VTR checkout, record with `--techlib "$ODIN3_ROOT/lib/lpm.o3lib"` instead (the manual
 has both). `N` walks the steps, `I` steps in, `O` steps out; the full walk is in the manual.
 
+Five examples ship under `examples/`: `counter`, `register`, `multiplier`, `instantiation` and
+`playthrough` (the existing top that joins the first three). `examples/record-all.sh` checks
+each example's notes and records all five into `examples/<name>/trace`, smallest design first.
+
 ## Documentation
 
 Start at the Yggdrasil III hub; every manual links to the others.

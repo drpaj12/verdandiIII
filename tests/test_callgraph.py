@@ -224,6 +224,25 @@ class GraphDatabaseTest(unittest.TestCase):
             [("shared", "src/a.c")],
         )
 
+    def test_seed_like_pattern_does_not_wildcard_an_underscore(self) -> None:
+        """src/axb.c must not resolve to the database's src/a_b.c through LIKE's wildcards."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_source(root, "")
+            path = str(root / "src" / "a_b.c")
+            make_graph_db(
+                root,
+                [
+                    ("Function", "top", f"{path}::top", path, 1, 3),
+                    ("Function", "mid", f"{path}::mid", path, 5, 7),
+                ],
+                [("CALLS", f"{path}::top", f"{path}::mid")],
+            )
+            ref = CodeRef(file="src/axb.c", line=1, end_line=3, function="top")
+            result = expand(root, [ref], 1)
+        self.assertEqual(result.source, SOURCE_GRAPH)
+        self.assertEqual([span.function for span in result.spans], ["top"])
+
     def test_graph_callee_outside_the_tree_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

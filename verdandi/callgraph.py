@@ -8,7 +8,7 @@ per level. Two sources, in order:
    row per function with ``file_path``, ``line_start`` and ``line_end``; its ``edges`` table
    holds ``CALLS`` rows from the caller's qualified name to the callee's. A callee edge whose
    target is a bare name (the graph's unresolved form) is resolved by function name, the same
-   file first.
+   file first, else only when the name is unique in the tree.
 2. A static scan of the step's file: the section-6 C function-definition scan (``Locator``)
    finds the function spans, and a call-site scan of the body (an identifier followed by ``(``)
    names the callees, which are resolved against the same file's definitions only.
@@ -122,17 +122,17 @@ def _seed_rows(connection: sqlite3.Connection, root: Path, refs: list[CodeRef]) 
         if ref.function is not None:
             row = connection.execute(
                 "SELECT qualified_name FROM nodes WHERE kind = 'Function' AND name = ?"
-                " AND (file_path = ? OR file_path LIKE ?)"
+                " AND (file_path = ? OR file_path LIKE ? ESCAPE '\\')"
                 " ORDER BY (file_path = ?) DESC, qualified_name LIMIT 1",
-                (ref.function, path, "%/" + ref.file, path),
+                (ref.function, path, _like_suffix(ref.file), path),
             ).fetchone()
         else:
             row = connection.execute(
                 "SELECT qualified_name FROM nodes WHERE kind = 'Function'"
-                " AND (file_path = ? OR file_path LIKE ?)"
+                " AND (file_path = ? OR file_path LIKE ? ESCAPE '\\')"
                 " AND line_start <= ? AND line_end >= ?"
                 " ORDER BY (file_path = ?) DESC, line_start DESC LIMIT 1",
-                (path, "%/" + ref.file, ref.line, ref.line, path),
+                (path, _like_suffix(ref.file), ref.line, ref.line, path),
             ).fetchone()
         if row is not None and row[0] not in found:
             found.append(str(row[0]))
@@ -197,6 +197,12 @@ def _unambiguous(
     if same_file:
         return same_file[:1]
     return in_tree if len(in_tree) == 1 else []
+
+
+def _like_suffix(file: str) -> str:
+    """A ``LIKE`` pattern for the tail of a path, with the file's own wildcards escaped."""
+    escaped = file.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return "%/" + escaped
 
 
 def _relative(root: Path, file_path: str) -> str | None:

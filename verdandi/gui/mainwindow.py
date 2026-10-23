@@ -31,6 +31,10 @@ class MainWindow(QMainWindow):
 
     The panes themselves arrive in Task 11; this window keeps one empty dock per pane so
     the layout and the object names are stable.
+
+    The window holds the keyboard focus: the stage buttons and the step tree are NoFocus, so a
+    click never pulls the keys away, and the follow box only takes focus when clicked or on
+    Ctrl+F. Space therefore always reaches the Next binding, whatever was clicked last.
     """
 
     def __init__(self, trace: Trace, parent: QWidget | None = None) -> None:
@@ -47,9 +51,11 @@ class MainWindow(QMainWindow):
         self._build()
         self._build_menus()
         self._refresh()
+        self.setFocus()
 
     def _build(self) -> None:
         self.setWindowTitle(f"Verdandi III - {self.trace.manifest.top}")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addWidget(self._stage_map())
@@ -75,6 +81,7 @@ class MainWindow(QMainWindow):
             button = QPushButton(f"{index + 1} {root.title}")
             button.setCheckable(True)
             button.setAutoExclusive(True)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.setToolTip(f"stage {index + 1}: {root.title}")
             button.clicked.connect(partial(self._jump_to_stage, index))
             layout.addWidget(button)
@@ -88,6 +95,7 @@ class MainWindow(QMainWindow):
         label = QLabel("Follow:")
         self.follow_edit.setPlaceholderText("an object name, e.g. q[3]")
         self.follow_edit.setClearButtonEnabled(True)
+        self.follow_edit.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.follow_edit.returnPressed.connect(self._follow)
         layout.addWidget(label)
         layout.addWidget(self.follow_edit, 1)
@@ -171,7 +179,7 @@ class MainWindow(QMainWindow):
         if not name:
             return
         matches = self.navigator.follow(name)
-        self.follow_edit.clearFocus()
+        self.setFocus()
         self._refresh()
         if matches:
             self.statusBar().showMessage(f"{len(matches)} steps touch {name}")

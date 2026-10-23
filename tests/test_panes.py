@@ -298,6 +298,37 @@ def code_trace(directory: Path, root: Path) -> Trace:
     return Trace(directory, make_manifest(), [step])
 
 
+CALL_SOURCE = """int leaf(int x) {
+    return x + 1;
+}
+
+int mid(int y) {
+    return leaf(y);
+}
+
+int top(int y) {
+    int a = mid(y);
+    return a;
+}
+"""
+
+
+def depth_trace(directory: Path, root: Path) -> Trace:
+    """One step whose function calls mid, which calls leaf, all in one file."""
+    source = root / "src" / "a.c"
+    source.parent.mkdir(parents=True)
+    source.write_text(CALL_SOURCE, encoding="utf-8")
+    step = Step(
+        id="s0001",
+        parent=None,
+        level=1,
+        title="opt",
+        anchor="pass:opt",
+        code=[CodeRef(file="src/a.c", line=9, end_line=12, function="top")],
+    )
+    return Trace(directory, make_manifest(), [step])
+
+
 @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
 class PaneTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -387,6 +418,118 @@ class PaneTest(unittest.TestCase):
             self.assertIsInstance(widget, QPlainTextEdit)
             assert isinstance(widget, QPlainTextEdit)
             self.assertIn("int two;", widget.toPlainText())
+            self.assertEqual(widget.extraSelections(), [])
+
+    def test_code_depth_zero_shows_the_body_only(self) -> None:
+        """D8 depth 0: the step's own function body, no call graph, no note."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            trace = depth_trace(Path(tmp) / "trace", root)
+            pane = CodePane(root=root)
+            pane.show(trace.steps[0], trace)
+            self.assertEqual(pane.depth_box.value(), 0)
+            self.assertGreaterEqual(pane.depth_box.maximum(), 1)
+            self.assertEqual(
+                [(span.function, span.depth) for span in pane.shown_spans()],
+                [("top", 0)],
+            )
+            self.assertTrue(pane.note.isHidden())
+            editor = pane.tabs.widget(0)
+            assert isinstance(editor, QPlainTextEdit)
+            self.assertEqual(len(editor.extraSelections()), 1)
+
+    def test_code_depth_one_adds_direct_callees(self) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            trace = depth_trace(Path(tmp) / "trace", root)
+            pane = CodePane(root=root)
+            pane.show(trace.steps[0], trace)
+            pane.depth_box.setValue(1)
+        self.assertEqual(
+            [(span.function, span.depth) for span in pane.shown_spans()],
+            [("top", 0), ("mid", 1)],
+        )
+        self.assertFalse(pane.note.isHidden())
+        self.assertEqual(pane.note.text(), "call graph: static scan of src/a.c")
+        editor = pane.tabs.widget(0)
+        assert isinstance(editor, QPlainTextEdit)
+        self.assertEqual(len(editor.extraSelections()), 2)
+
+    def test_code_depth_names_the_graph_database(self) -> None:
+        """A readable code-review-graph database is used and named in the pane."""
+        from tests.test_callgraph import graph_nodes, make_graph_db
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            trace = depth_trace(Path(tmp) / "trace", root)
+            path = str(root / "src" / "a.c")
+            make_graph_db(
+                root,
+                graph_nodes(root),
+                [("CALLS", f"{path}::top", f"{path}::mid")],
+            )
+            pane = CodePane(root=root)
+            pane.show(trace.steps[0], trace)
+            pane.depth_box.setValue(1)
+        self.assertEqual(pane.note.text(), "call graph: code-review-graph DB")
+        self.assertEqual(
+            [span.function for span in pane.shown_spans()], ["top", "mid"]
+        )
+
+    def test_code_depth_without_a_source_tree(self) -> None:
+        """The depth control exists and says so when there is no ODIN3_ROOT to read."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "src" / "a.c"
+            source.parent.mkdir(parents=True)
+            source.write_text(CALL_SOURCE, encoding="utf-8")
+            step = Step(
+                id="s0001",
+                parent=None,
+                level=1,
+                title="opt",
+                anchor="pass:opt",
+                code=[CodeRef(file="src/a.c", line=9, end_line=12, function="top")],
+            )
+            trace = Trace(Path(tmp) / "trace", make_manifest(), [step])
+            with mock.patch.dict(os.environ, {"ODIN3_ROOT": ""}):
+                pane = CodePane(root=None)
+                pane.show(step, trace)
+                pane.depth_box.setValue(2)
+            widget = pane.tabs.widget(0)
+            assert isinstance(widget, QPlainTextEdit)
+            self.assertIn("source not available: src/a.c", widget.toPlainText())
+            self.assertFalse(pane.note.isHidden())
+            self.assertIn("no source tree", pane.note.text())
+
+    def test_code_open_file(self) -> None:
+        """A tree click opens the file in its own tab, whole and without a highlight."""
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "odin3"
+            depth_trace(Path(tmp) / "trace", root)
+            pane = CodePane(root=root)
+            pane.open_file("src/a.c")
+            self.assertEqual(pane.tabs.count(), 1)
+            self.assertEqual(pane.tabs.tabText(0), "a.c")
+            widget = pane.tabs.widget(0)
+            assert isinstance(widget, QPlainTextEdit)
+            self.assertIn("int mid(int y) {", widget.toPlainText())
             self.assertEqual(widget.extraSelections(), [])
 
     def test_data_filters_touched(self) -> None:

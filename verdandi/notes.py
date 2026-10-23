@@ -114,12 +114,14 @@ def _abc_words(locator: Locator) -> set[str]:
 def _function_exists(name: str, locator: Locator) -> bool:
     """True when a source function backs a ``func:`` anchor.
 
-    Without a source tree there is nothing to scan against, so the anchor is not reported as
-    stale (it cannot be checked either way).
+    Without a source tree there is nothing to scan against, so a named anchor is not reported as
+    stale (it cannot be checked either way); an empty name is malformed and always is.
     """
+    if not name:
+        return False
     if locator.root is None:
         return True
-    return bool(name) and locator.has_function(name)
+    return locator.has_function(name)
 
 
 def _rule_exists(rest: str, locator: Locator) -> bool:

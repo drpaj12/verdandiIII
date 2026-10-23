@@ -86,6 +86,10 @@ class NoteLoadTest(unittest.TestCase):
                 load_notes(directory)
             self.assertIn(path.name, str(raised.exception))
 
+    def test_empty_function_anchor_stale(self) -> None:
+        anchors = stale({"func:": "x"}, set(), Locator(None), set())
+        self.assertEqual(anchors, ["func:"])
+
     def test_empty_directory_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)

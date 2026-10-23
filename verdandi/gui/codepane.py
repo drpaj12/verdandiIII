@@ -144,7 +144,7 @@ class CodePane:
 
     def _set_note(self, expansion: Expansion, depth: int) -> None:
         """Name the call-graph source in use; depth 0 needs no graph and shows no note."""
-        if depth <= 0:
+        if depth <= 0 or not expansion.spans:
             self.note.clear()
             self.note.setVisible(False)
             return

@@ -68,19 +68,17 @@ class CliTest(unittest.TestCase):
             main(["nope"])
         self.assertEqual(ex.exception.code, 2)
 
-    def test_subcommands_not_implemented_yet(self) -> None:
-        # Every subcommand is still unwired at Task 1; drop each name from this
-        # loop in the task that wires it: Task 6 wires record and info, Task 9
-        # wires check-notes, Task 10 wires play.
-        unwired = ("play",)
-        for name in unwired:
-            with self.subTest(name=name):
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    code = main([name])
-                self.assertEqual(code, 2)
-                self.assertEqual(out.getvalue().strip(),
-                                 f"verdandi {name}: not implemented yet")
+    def test_play_requires_a_trace(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ex:
+            main(["play"])
+        self.assertEqual(ex.exception.code, 2)
+
+    def test_play_bad_trace_is_usage_error(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = main(["play", "/nonexistent/verdandi-trace"])
+        self.assertEqual(code, 2)
+        self.assertIn("verdandi play:", stderr.getvalue())
 
 
     def test_info_valid_trace(self) -> None:

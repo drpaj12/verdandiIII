@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     notes_parser = parsers["check-notes"]
     notes_parser.add_argument("--odin3-root", type=Path, metavar="DIR")
     notes_parser.add_argument("--notes", type=Path, metavar="DIR")
+    parsers["play"].add_argument("trace", type=Path, metavar="TRACE")
     parsers["info"].add_argument("trace", type=Path, metavar="TRACE")
     return parser
 
@@ -144,13 +145,26 @@ def _check_notes(args: argparse.Namespace) -> int:
     return 0
 
 
+def _play(args: argparse.Namespace) -> int:
+    try:
+        trace = load(args.trace)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"verdandi play: {exc}", file=sys.stderr)
+        return 2
+    try:
+        from verdandi.gui.app import player
+    except ImportError as exc:
+        print(f"verdandi play: the player needs PySide6 ({exc})", file=sys.stderr)
+        return 2
+    return player(trace)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "record":
-        return _record(args)
-    if args.command == "check-notes":
-        return _check_notes(args)
-    if args.command == "info":
-        return _info(args)
-    print(f"verdandi {args.command}: not implemented yet")
-    return 2
+    handlers = {
+        "record": _record,
+        "play": _play,
+        "check-notes": _check_notes,
+        "info": _info,
+    }
+    return handlers[args.command](args)

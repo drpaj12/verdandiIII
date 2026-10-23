@@ -103,6 +103,16 @@ class NoteLoadTest(unittest.TestCase):
         self.assertEqual(anchors, ["abc:bogus", "pass:nope", "stage:Nope"])
 
     @unittest.skipUnless(HAVE_ODIN3 and ODIN3_ROOT is not None, "needs odin3 and ODIN3_ROOT")
+    def test_rule_anchor_checked_against_rule_table(self) -> None:
+        assert ODIN3_ROOT is not None
+        notes = {
+            "rule:opt_expr:const_and": "x",
+            "rule:opt_expr:no_such_rule": "x",
+        }
+        anchors = stale(notes, set(), Locator(ODIN3_ROOT), set())
+        self.assertEqual(anchors, ["rule:opt_expr:no_such_rule"])
+
+    @unittest.skipUnless(HAVE_ODIN3 and ODIN3_ROOT is not None, "needs odin3 and ODIN3_ROOT")
     def test_shipped_notes_not_stale(self) -> None:
         notes = load_notes(shipped_dir())
         for title in stage_titles():

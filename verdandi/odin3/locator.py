@@ -203,6 +203,20 @@ class Locator:
                         names.add(ref.function)
         return names
 
+    def has_literal(self, files: list[Path], text: str) -> bool:
+        """True when one of ``files`` holds ``text`` as a whole C string literal.
+
+        Rule names are runtime values handed to a pass's DEBUG formats, so they are read from
+        the literals of the pass's source (its rule-name table), never from the format text.
+        """
+        for path in files:
+            content = self._text(path)
+            if content is None:
+                continue
+            if any(text in _literals(line) for line in content.splitlines()):
+                return True
+        return False
+
     def find_text(self, files: list[Path], text: str) -> list[CodeRef]:
         """Every line of ``files`` containing ``text``, with its enclosing function's name."""
         refs: list[CodeRef] = []

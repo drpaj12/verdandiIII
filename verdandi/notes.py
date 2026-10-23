@@ -59,11 +59,11 @@ def stale(
     """The anchors no current source backs, in name order (spec 8: ``check-notes``).
 
     ``pass:`` is checked against the build's pass names, ``stage:`` against the stage map,
-    ``abc:`` against the command words of the current ABC script, ``rule:`` against the DEBUG
-    log lines of its pass, and ``func:`` against the C function definitions of the pass and
-    front-end roots. Without a source tree the function and rule anchors cannot be checked and
-    are left alone; the shipped notes carry none, so a tree-less check still means something.
-    An anchor of no known kind is stale.
+    ``abc:`` against the command words of the current ABC script, ``rule:`` against the
+    rule-name literals of its pass's source, and ``func:`` against the C function definitions of
+    the pass and front-end roots. Without a source tree the function and rule anchors cannot be
+    checked and are left alone; the shipped notes carry none, so a tree-less check still means
+    something. An anchor of no known kind is stale.
     """
     words = _abc_words(locator)
     anchors: list[str] = []
@@ -120,10 +120,14 @@ def _function_exists(name: str, locator: Locator) -> bool:
 
 
 def _rule_exists(rest: str, locator: Locator) -> bool:
-    """True when a pass's DEBUG log lines back a ``rule:<pass>:<rule>`` anchor."""
+    """True when a pass's source holds a string literal for a ``rule:<pass>:<rule>`` anchor.
+
+    Rule names are runtime values in the DEBUG format, so the format text does not hold them;
+    the pass's rule-name table does, as one C string literal per rule.
+    """
     pass_name, _, rule = rest.partition(":")
     if not pass_name or not rule:
         return False
     if locator.root is None:
         return True
-    return bool(locator.find_log_text(locator.pass_files(pass_name), rule))
+    return locator.has_literal(locator.pass_files(pass_name), rule)

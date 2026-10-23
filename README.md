@@ -8,6 +8,15 @@ suite of Odin III (<https://github.com/drpaj12/odin3>), Wyrd III
 (<https://github.com/drpaj12/wyrd>), Loki III (<https://github.com/drpaj12/loki>) and Midgard III
 (the Verilog Town game).
 
+## Quick start
+
+    verdandi record examples/playthrough/playthrough.v --top playthrough \
+      --arch "$VTR_ROOT/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml" -o trace
+    verdandi play trace
+
+Without a VTR checkout, record with `--techlib "$ODIN3_ROOT/lib/lpm.o3lib"` instead (the manual
+has both). `N` walks the steps, `I` steps in, `O` steps out; the full walk is in the manual.
+
 ## Documentation
 
 Start at the Yggdrasil III hub; every manual links to the others.
@@ -20,3 +29,5 @@ Start at the Yggdrasil III hub; every manual links to the others.
 - Tutorials (PDF): [command line](https://drpaj12.github.io/wyrd/wyrd-tutorial.pdf) and
   [GUI](https://drpaj12.github.io/wyrd/wyrd-gui-tutorial.pdf).
 - [Loki III manual](https://drpaj12.github.io/loki/).
+- [Verdandi III manual](https://drpaj12.github.io/verdandiIII/): this tool, with the shipped
+  [playthrough example](examples/playthrough/README.md).

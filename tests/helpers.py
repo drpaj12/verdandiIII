@@ -47,6 +47,25 @@ def abc_binary() -> str | None:
     return None
 
 
+def vtr_arch() -> Path | None:
+    """The k6 architecture the playthrough records with, when a VTR checkout is around.
+
+    ``$VTR_ROOT``, else ``~/odin3-ws/external/vtr-verilog-to-routing`` (the location
+    ``odin3/tools/vtr-qor/vtr_qor.py`` defaults to).
+    """
+    roots = []
+    configured = os.environ.get("VTR_ROOT")
+    if configured:
+        roots.append(Path(configured))
+    roots.append(Path.home() / "odin3-ws" / "external" / "vtr-verilog-to-routing")
+    relative = Path("vtr_flow") / "arch" / "timing" / "k6_frac_N10_frac_chain_mem32K_40nm.xml"
+    for root in roots:
+        arch = root / relative
+        if arch.is_file():
+            return arch
+    return None
+
+
 HAVE_ODIN3: bool = _odin3_available()
 HAVE_ABC: bool = abc_binary() is not None
 HAVE_DOT: bool = shutil.which("dot") is not None

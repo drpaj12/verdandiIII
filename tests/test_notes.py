@@ -97,6 +97,24 @@ class NoteLoadTest(unittest.TestCase):
                 load_notes(directory)
             self.assertIn(tmp, str(raised.exception))
 
+    def test_missing_blank_line_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            path = write_note(directory, "bad.md", "anchor: pass:proc\nno blank line.\n")
+            with self.assertRaises(ValueError) as raised:
+                load_notes(directory)
+            self.assertIn(path.name, str(raised.exception))
+
+    def test_duplicate_anchor_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_note(directory, "first.md", "anchor: pass:proc\n\nfirst.\n")
+            path = write_note(directory, "second.md", "anchor: pass:proc\n\nsecond.\n")
+            with self.assertRaises(ValueError) as raised:
+                load_notes(directory)
+            self.assertIn(path.name, str(raised.exception))
+            self.assertIn("pass:proc", str(raised.exception))
+
     def test_stale_pass_flagged(self) -> None:
         notes = {
             "pass:nope": "x",
@@ -151,6 +169,41 @@ class CheckNotesCliTest(unittest.TestCase):
                         )
                     self.assertEqual(code, 2, err.getvalue())
                     self.assertIn(str(bad), err.getvalue())
+
+    @unittest.skipUnless(HAVE_ODIN3, "needs odin3")
+    def test_cli_notes_errors_exit_2(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            cases = [directory / "absent"]
+            empty = directory / "empty"
+            empty.mkdir()
+            cases.append(empty)
+            for notes_dir in cases:
+                with self.subTest(notes_dir=notes_dir.name):
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err):
+                        code = main(["check-notes", "--notes", str(notes_dir)])
+                    self.assertEqual(code, 2, err.getvalue())
+                    self.assertIn(str(notes_dir), err.getvalue())
+
+    @unittest.skipUnless(HAVE_ODIN3 and ODIN3_ROOT is not None, "needs odin3 and ODIN3_ROOT")
+    def test_cli_check_notes_with_root(self) -> None:
+        assert ODIN3_ROOT is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_note(directory, "rule.md", "anchor: rule:opt_expr:const_and\n\nfolds.\n")
+            argv = ["check-notes", "--odin3-root", str(ODIN3_ROOT), "--notes", str(directory)]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(argv)
+            self.assertEqual(code, 0, out.getvalue())
+            self.assertIn("no stale anchors", out.getvalue())
+            write_note(directory, "bad.md", "anchor: rule:opt_expr:no_such_rule\n\nfolds.\n")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(argv)
+            self.assertEqual(code, 1)
+            self.assertIn("rule:opt_expr:no_such_rule", out.getvalue())
 
     @unittest.skipUnless(HAVE_ODIN3 and ODIN3_ROOT is not None, "needs odin3 and ODIN3_ROOT")
     def test_cli_check_notes(self) -> None:

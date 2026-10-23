@@ -172,6 +172,15 @@ class NavigatorTest(unittest.TestCase):
             navigator.move_to("nope")
         self.assertEqual(navigator.current().id, "s0001")
 
+    def test_back_after_follow(self) -> None:
+        navigator = Navigator(self.trace)
+        self.assertEqual(navigator.jump_stage(1).id, "s0004")
+        self.assertEqual(self.ids(*navigator.follow("q[3]")), ["s0003", "s0005"])
+        self.assertEqual(navigator.current().id, "s0003")
+        self.assertEqual(navigator.back().id, "s0004")
+        self.assertEqual(navigator.back().id, "s0001")
+        self.assertEqual(navigator.back().id, "s0001")
+
     def test_back_after_jump(self) -> None:
         navigator = Navigator(self.trace)
         self.assertEqual(navigator.jump_stage(2).id, "s0008")

@@ -1,0 +1,249 @@
+"""Pane tests: Verilog highlight columns, code fallback, data filter, explanation order, no dot."""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from typing import Any
+from unittest import mock
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from tests.test_navigator import make_manifest
+from verdandi.trace import CodeRef, Diff, ObjRef, Step, Trace, load, save
+
+HAVE_QT = importlib.util.find_spec("PySide6") is not None
+
+
+def ir_snapshot(modules: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"kind": "ir", "modules": modules}
+
+
+def write_sources(directory: Path) -> list[Path]:
+    """A CRLF source (a plain identifier) and a tab-indented source beside the trace."""
+    crlf = directory / "crlf.v"
+    crlf.write_bytes(b"module crlf;\r\n  wire alpha;\r\nendmodule\r\n")
+    tab = directory / "tab.v"
+    tab.write_bytes(b"module tab;\n\twire beta;\nendmodule\n")
+    return [crlf, tab]
+
+
+def highlight_trace(directory: Path) -> Trace:
+    sources = write_sources(directory.parent)
+    snapshot = ir_snapshot(
+        [
+            {
+                "name": "m",
+                "nodes": [],
+                "nets": [
+                    {
+                        "id": 10,
+                        "name": "alpha",
+                        "drivers": [],
+                        "sinks": [],
+                        "sources": [["crlf.v", 2, 8, 2, 13]],
+                    },
+                    {
+                        "id": 11,
+                        "name": "beta",
+                        "drivers": [],
+                        "sinks": [],
+                        "sources": [["tab.v", 2, 7, 2, 11]],
+                    },
+                ],
+                "wires": [],
+            }
+        ]
+    )
+    diff = Diff(
+        added=[ObjRef("m", "net", 10, "alpha"), ObjRef("m", "net", 11, "beta")],
+        removed=[],
+        changed=[],
+        by_name=False,
+    )
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=0,
+            title="Read",
+            anchor="pass:read_verilog",
+            snapshot="s0001.json",
+            diff=diff,
+        )
+    ]
+    save(directory, make_manifest(), steps, {"s0001.json": snapshot}, sources)
+    return load(directory)
+
+
+def data_trace(directory: Path) -> Trace:
+    snapshot = ir_snapshot(
+        [
+            {
+                "name": "counter2",
+                "nodes": [
+                    {"id": 1, "name": "a", "type": "$dff", "params": {}, "pins": [], "sources": []},
+                    {"id": 2, "name": "b", "type": "$not", "params": {}, "pins": [], "sources": []},
+                ],
+                "nets": [
+                    {"id": 20, "name": "q", "drivers": [1], "sinks": [2], "sources": []}
+                ],
+                "wires": [],
+            }
+        ]
+    )
+    diff = Diff(
+        added=[],
+        removed=[],
+        changed=[ObjRef("counter2", "node", 1, "a")],
+        by_name=False,
+    )
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=1,
+            title="opt",
+            anchor="pass:opt",
+            snapshot="s0001.json",
+            diff=diff,
+        )
+    ]
+    save(directory, make_manifest(), steps, {"s0001.json": snapshot}, [])
+    return load(directory)
+
+
+@unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
+class PaneTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from PySide6.QtWidgets import QApplication
+
+        existing = QApplication.instance()
+        self.app = existing if isinstance(existing, QApplication) else QApplication([])
+
+    def test_highlight_columns(self) -> None:
+        from verdandi.gui.verilogpane import VerilogPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = highlight_trace(Path(tmp) / "trace")
+            pane = VerilogPane()
+            pane.show(trace.steps[0], trace)
+            self.assertEqual(pane.highlighted_texts(), ["alpha", "beta"])
+
+    def test_code_missing_file(self) -> None:
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        from verdandi.gui.codepane import CodePane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ref = CodeRef(
+                file="src/passes/nope/nope.c", line=3, end_line=5, function="nope"
+            )
+            step = Step(
+                id="s0001",
+                parent=None,
+                level=1,
+                title="nope",
+                anchor="pass:nope",
+                code=[ref],
+            )
+            trace = Trace(root / "trace", make_manifest(), [step])
+            pane = CodePane(root=root)
+            pane.show(step, trace)
+            self.assertEqual(pane.tabs.count(), 1)
+            widget = pane.tabs.widget(0)
+            self.assertIsInstance(widget, QPlainTextEdit)
+            assert isinstance(widget, QPlainTextEdit)
+            self.assertIn(
+                "source not available: src/passes/nope/nope.c", widget.toPlainText()
+            )
+
+    def test_data_filters_touched(self) -> None:
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = data_trace(Path(tmp) / "trace")
+            pane = DataPane()
+            pane.show(trace.steps[0], trace)
+            self.assertEqual(pane.node_table.rowCount(), 1)
+            item = pane.node_table.item(0, 0)
+            assert item is not None
+            self.assertEqual(item.text(), "1")
+            pane.all_box.setChecked(True)
+            self.assertEqual(pane.node_table.rowCount(), 2)
+
+    def test_explain_fallback_order(self) -> None:
+        from verdandi.gui.explainpane import ExplainPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Step(
+                id="s0001",
+                parent=None,
+                level=0,
+                title="Optimisation",
+                anchor="stage:Optimisation",
+            )
+            event = Step(
+                id="s0002",
+                parent="s0001",
+                level=3,
+                title="opt",
+                anchor="rule:opt:merge",
+                diff=Diff(
+                    added=[ObjRef("m", "node", 1, "a")],
+                    removed=[],
+                    changed=[],
+                    by_name=False,
+                ),
+            )
+            child = Step(
+                id="s0003",
+                parent="s0002",
+                level=3,
+                title="merged cell _1_",
+                anchor="rule:opt:merge",
+            )
+            trace = Trace(Path(tmp), make_manifest(), [root, event, child])
+            full = {
+                "rule:opt:merge": "anchor note",
+                "pass:opt": "pass note",
+                "stage:Optimisation": "stage note",
+            }
+            pane = ExplainPane(notes=full)
+            pane.show(event, trace)
+            self.assertEqual(pane.browser.toPlainText(), "anchor note")
+            pane = ExplainPane(
+                notes={"pass:opt": "pass note", "stage:Optimisation": "stage note"}
+            )
+            pane.show(event, trace)
+            self.assertEqual(pane.browser.toPlainText(), "pass note")
+            pane = ExplainPane(notes={"stage:Optimisation": "stage note"})
+            pane.show(event, trace)
+            self.assertEqual(pane.browser.toPlainText(), "stage note")
+            pane = ExplainPane(notes={})
+            pane.show(event, trace)
+            text = pane.browser.toPlainText()
+            self.assertIn("opt: 1 added, 0 removed, 0 changed", text)
+            self.assertIn("merged cell _1_", text)
+
+    def test_graph_without_dot(self) -> None:
+        from verdandi.gui import datapane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = data_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "which", return_value=None):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+        self.assertFalse(pane.has_graph())
+        self.assertEqual(pane.node_table.rowCount(), 1)
+        self.assertTrue(
+            pane.tabs.isTabVisible(pane.tabs.indexOf(pane.node_table))
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

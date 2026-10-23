@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
+from typing import Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QKeyEvent, QStandardItem, QStandardItemModel
@@ -19,6 +20,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from verdandi.gui.codepane import CodePane
+from verdandi.gui.datapane import DataPane
+from verdandi.gui.diffstrip import DiffStrip
+from verdandi.gui.explainpane import ExplainPane
+from verdandi.gui.verilogpane import VerilogPane
 from verdandi.navigator import Navigator
 from verdandi.trace import Step, Trace
 
@@ -26,11 +32,16 @@ PANE_NAMES = ("Verilog", "Code", "Data", "Explanation", "Diff")
 KEYS_HINT = "N next   I in   O out   B back   1-9 stage   Ctrl+F follow (again: next match)"
 
 
+class Pane(Protocol):
+    """What a dock's pane exposes: the widget it fills and the step hook that fills it."""
+
+    widget: QWidget
+
+    def show(self, step: Step, trace: Trace) -> None: ...
+
+
 class MainWindow(QMainWindow):
     """One recorded walk: the stage map and step tree move the navigator, the panes follow.
-
-    The panes themselves arrive in Task 11; this window keeps one empty dock per pane so
-    the layout and the object names are stable.
 
     The window holds the keyboard focus: the stage buttons and the step tree are NoFocus, so a
     click never pulls the keys away, and the follow box only takes focus when clicked or on
@@ -48,6 +59,7 @@ class MainWindow(QMainWindow):
         self.model = QStandardItemModel(self)
         self.items: dict[str, QStandardItem] = {}
         self.docks: dict[str, QDockWidget] = {}
+        self.panes: dict[str, Pane] = {}
         self.matches: list[Step] = []
         self.match_index = 0
         self.match_name = ""
@@ -130,14 +142,20 @@ class MainWindow(QMainWindow):
             "Explanation": Qt.DockWidgetArea.BottomDockWidgetArea,
             "Diff": Qt.DockWidgetArea.BottomDockWidgetArea,
         }
-        for name in PANE_NAMES:
+        panes: tuple[Pane, ...] = (
+            VerilogPane(),
+            CodePane(),
+            DataPane(),
+            ExplainPane(),
+            DiffStrip(),
+        )
+        for name, pane in zip(PANE_NAMES, panes, strict=True):
             dock = QDockWidget(name, self)
             dock.setObjectName(f"dock-{name.lower()}")
-            placeholder = QLabel(f"{name} pane (Task 11)")
-            placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            dock.setWidget(placeholder)
+            dock.setWidget(pane.widget)
             self.addDockWidget(areas[name], dock)
             self.docks[name] = dock
+            self.panes[name] = pane
 
     def _build_menus(self) -> None:
         view_menu = self.menuBar().addMenu("View")
@@ -150,6 +168,8 @@ class MainWindow(QMainWindow):
         self.title_label.setText(step.title)
         self._sync_stage_map(step)
         self._sync_tree(step)
+        for pane in self.panes.values():
+            pane.show(step, self.trace)
 
     def _sync_stage_map(self, step: Step) -> None:
         root = self._root_of(step)

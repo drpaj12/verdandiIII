@@ -12,17 +12,26 @@ keeps the tab the user chose when that tab still shows, and never forces a tab o
 The graph's net labels come from the core's net name when it reports one; on the recorded
 playthrough trace it reports none, so label derivation falls back to the AST (see
 ``verdandi.graph``).
+
+Provenance (D5, D6): every node and net row, every AST node and every symbol table row carries
+its loc from the trace as a small grey badge in a "Provenance" column. The graph's nodes carry
+their loc as a second, small label line and a tooltip. A "show all provenance" checkbox (checked
+by default) hides and shows every badge. Clicking a graph node, a table row or cell, or an AST
+tree node reports that object's loc through ``on_source_clicked``, which the window points at
+the Code pane; a click on an object without a loc reports nothing.
 """
 
 from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
+from functools import partial
 from shutil import which
 from typing import Any
 
-from PySide6.QtCore import QByteArray
-from PySide6.QtSvgWidgets import QSvgWidget
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -37,14 +46,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from verdandi.graph import slice_dot
+from verdandi.graph import PROVENANCE_COLOR, node_element_id, slice_dot
 from verdandi.gui.explainpane import pass_name
+from verdandi.gui.graphview import SvgGraph
+from verdandi.provenance import Loc, loc_from_text, object_loc
 from verdandi.symtab import symbol_rows
 from verdandi.trace import Diff, Step, Trace
 
-NODE_HEADERS = ("ID", "Name", "Type", "Params")
-NET_HEADERS = ("ID", "Name", "Drivers", "Sinks")
-SYMBOL_HEADERS = ("Module", "Name", "Declaration", "Uses")
+NODE_HEADERS = ("ID", "Name", "Type", "Params", "Provenance")
+NET_HEADERS = ("ID", "Name", "Drivers", "Sinks", "Provenance")
+SYMBOL_HEADERS = ("Module", "Name", "Declaration", "Uses", "Provenance")
 NO_STRUCTURE = "log event (no snapshot)"
 
 
@@ -97,11 +108,35 @@ def _table(headers: tuple[str, ...]) -> QTableWidget:
     return table
 
 
-def _set_row(table: QTableWidget, values: tuple[Any, ...]) -> None:
+def _set_row(table: QTableWidget, values: tuple[Any, ...], loc: Loc | None = None) -> None:
+    """Append one row; every cell carries ``loc`` so a click on any column opens the source."""
     row = table.rowCount()
     table.insertRow(row)
     for column, value in enumerate(values):
-        table.setItem(row, column, QTableWidgetItem(str(value)))
+        item = QTableWidgetItem(str(value))
+        if loc is not None:
+            item.setData(Qt.ItemDataRole.UserRole, loc)
+            if column == len(values) - 1:
+                _style_badge(item, loc)
+        table.setItem(row, column, item)
+
+
+def _style_badge(item: QTableWidgetItem, loc: Loc) -> None:
+    """Make a provenance cell read as a small grey badge, with the full reference on hover."""
+    item.setForeground(QBrush(QColor(PROVENANCE_COLOR)))
+    item.setToolTip(loc.reference)
+
+
+def graph_targets(snapshot: dict[str, Any]) -> dict[str, Loc]:
+    """The graph's drawn nodes and their locs, keyed by SVG element id (D6)."""
+    found: dict[str, Loc] = {}
+    for module in snapshot.get("modules", []):
+        name = str(module.get("name", ""))
+        for node in module.get("nodes", []):
+            loc = object_loc(node)
+            if loc is not None:
+                found[node_element_id(name, int(node["id"]))] = loc
+    return found
 
 
 class DataPane:
@@ -119,22 +154,35 @@ class DataPane:
         self.all_box = QCheckBox("all objects")
         self.net_names_box = QCheckBox("net names")
         self.net_names_box.setChecked(True)
+        self.provenance_box = QCheckBox("show all provenance")
+        self.provenance_box.setObjectName("provenance-toggle")
+        self.provenance_box.setChecked(True)
+        self.provenance_box.setToolTip("show the source line of every object, or hide all badges")
         controls = QWidget()
-        controls_layout = QHBoxLayout(controls)
+        controls_layout = QVBoxLayout(controls)
         controls_layout.setContentsMargins(0, 0, 0, 0)
-        controls_layout.addWidget(self.all_box)
-        controls_layout.addWidget(self.net_names_box)
+        boxes_layout = QHBoxLayout()
+        boxes_layout.setContentsMargins(0, 0, 0, 0)
+        boxes_layout.addWidget(self.all_box)
+        boxes_layout.addWidget(self.net_names_box)
+        boxes_layout.addStretch(1)
+        provenance_layout = QHBoxLayout()
+        provenance_layout.setContentsMargins(0, 0, 0, 0)
+        provenance_layout.addWidget(self.provenance_box)
+        provenance_layout.addStretch(1)
+        controls_layout.addLayout(boxes_layout)
+        controls_layout.addLayout(provenance_layout)
         self.tabs = QTabWidget()
         self.node_table = _table(NODE_HEADERS)
         self.net_table = _table(NET_HEADERS)
         self.ast_tree = QTreeWidget()
-        self.ast_tree.setHeaderLabel("AST")
+        self.ast_tree.setHeaderLabels(["AST", "Provenance"])
         self.symbol_table = _table(SYMBOL_HEADERS)
-        self.svg = QSvgWidget()
+        self.graph = SvgGraph()
         self._graph_page = QWidget()
         graph_layout = QVBoxLayout(self._graph_page)
         graph_layout.setContentsMargins(0, 0, 0, 0)
-        graph_layout.addWidget(self.svg)
+        graph_layout.addWidget(self.graph)
         self.tabs.addTab(self.node_table, "Nodes")
         self.tabs.addTab(self.net_table, "Nets")
         self.tabs.addTab(self.ast_tree, "AST")
@@ -148,9 +196,16 @@ class DataPane:
         self._step: Step | None = None
         self._trace: Trace | None = None
         self._structure = NO_STRUCTURE
+        self._tables = (self.node_table, self.net_table, self.symbol_table)
+        self.on_source_clicked: Callable[[Loc], None] | None = None
         self.all_box.toggled.connect(self._rerender)
         self.net_names_box.toggled.connect(self._rerender)
+        self.provenance_box.toggled.connect(self._rerender)
         self.tabs.currentChanged.connect(self._sync_badge)
+        for table in self._tables:
+            table.cellClicked.connect(partial(self._cell_clicked, table))
+        self.ast_tree.itemClicked.connect(self._item_clicked)
+        self.graph.on_node_clicked = self._request_source
 
     def show(self, step: Step, trace: Trace) -> None:
         self._step = step
@@ -164,6 +219,13 @@ class DataPane:
     def _rerender(self, _checked: bool = False) -> None:
         self._render()
 
+    def _apply_provenance(self) -> None:
+        """The toggle hides or shows every badge column (D5)."""
+        show = self.provenance_box.isChecked()
+        for table in self._tables:
+            table.setColumnHidden(table.columnCount() - 1, not show)
+        self.ast_tree.setColumnHidden(1, not show)
+
     def _render(self) -> None:
         if self._step is None or self._trace is None:
             return
@@ -172,6 +234,7 @@ class DataPane:
         self.net_table.setRowCount(0)
         self.ast_tree.clear()
         self.symbol_table.setRowCount(0)
+        self._apply_provenance()
         self.note.clear()
         self.note.setVisible(False)
         self._set_tabs(nodes=False, nets=False, ast=False, symbols=False, graph=False)
@@ -253,16 +316,35 @@ class DataPane:
                 if not show_all and (name, int(node["id"])) not in touched["node"]:
                     continue
                 params = json.dumps(node.get("params", {}), sort_keys=True)
+                loc = object_loc(node)
                 _set_row(
                     self.node_table,
-                    (node["id"], node.get("name", ""), node.get("type", ""), params),
+                    (
+                        node["id"],
+                        node.get("name", ""),
+                        node.get("type", ""),
+                        params,
+                        loc.badge if loc is not None else "",
+                    ),
+                    loc,
                 )
             for net in module.get("nets", []):
                 if not show_all and (name, int(net["id"])) not in touched["net"]:
                     continue
                 drivers = ", ".join(str(ident) for ident in net.get("drivers", []))
                 sinks = ", ".join(str(ident) for ident in net.get("sinks", []))
-                _set_row(self.net_table, (net["id"], net.get("name", ""), drivers, sinks))
+                loc = object_loc(net)
+                _set_row(
+                    self.net_table,
+                    (
+                        net["id"],
+                        net.get("name", ""),
+                        drivers,
+                        sinks,
+                        loc.badge if loc is not None else "",
+                    ),
+                    loc,
+                )
 
     def _fill_ast(self, snapshot: dict[str, Any]) -> None:
         roots = snapshot.get("roots", [])
@@ -272,7 +354,12 @@ class DataPane:
         while stack:
             node, parent = stack.pop()
             label = str(node.get("name") or node.get("kind", ""))
-            item = QTreeWidgetItem([label])
+            loc = loc_from_text(node.get("loc"))
+            item = QTreeWidgetItem([label, loc.badge if loc is not None else ""])
+            if loc is not None:
+                item.setData(0, Qt.ItemDataRole.UserRole, loc)
+                item.setToolTip(0, loc.reference)
+                item.setForeground(1, QBrush(QColor(PROVENANCE_COLOR)))
             if parent is None:
                 self.ast_tree.addTopLevelItem(item)
             else:
@@ -282,11 +369,43 @@ class DataPane:
 
     def _fill_symbols(self, snapshot: dict[str, Any]) -> None:
         for symbol in symbol_rows(snapshot):
+            declaration = loc_from_text(symbol.declaration)
+            first_use = loc_from_text(symbol.uses[0]) if symbol.uses else declaration
             uses = "; ".join(symbol.uses) if symbol.uses else "-"
-            _set_row(
-                self.symbol_table,
-                (symbol.module, symbol.name, symbol.declaration, uses),
+            cells: tuple[tuple[str, Loc | None], ...] = (
+                (symbol.module, declaration),
+                (symbol.name, declaration),
+                (symbol.declaration, declaration),
+                (uses, first_use),
+                (declaration.badge if declaration is not None else "", declaration),
             )
+            row = self.symbol_table.rowCount()
+            self.symbol_table.insertRow(row)
+            for column, (text, loc) in enumerate(cells):
+                item = QTableWidgetItem(text)
+                if loc is not None:
+                    item.setData(Qt.ItemDataRole.UserRole, loc)
+                    if column == len(cells) - 1:
+                        _style_badge(item, loc)
+                self.symbol_table.setItem(row, column, item)
+
+    def _request_source(self, loc: Loc) -> None:
+        """Report one clicked loc to the window's Code pane hook (D6)."""
+        if self.on_source_clicked is not None:
+            self.on_source_clicked(loc)
+
+    def _cell_clicked(self, table: QTableWidget, row: int, column: int) -> None:
+        item = table.item(row, column)
+        if item is None:
+            return
+        loc = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(loc, Loc):
+            self._request_source(loc)
+
+    def _item_clicked(self, item: QTreeWidgetItem, _column: int = 0) -> None:
+        loc = item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(loc, Loc):
+            self._request_source(loc)
 
     def _render_slice(self, snapshot: dict[str, Any], diff: Diff | None) -> bool:
         """Load the slice picture; True when the Graph tab holds one."""
@@ -298,11 +417,12 @@ class DataPane:
                 diff,
                 show_net_names=self.net_names_box.isChecked(),
                 ast=self._ast_snapshot(),
+                show_provenance=self.provenance_box.isChecked(),
             )
         )
         if svg is None:
             return False
-        self.svg.load(QByteArray(svg))
+        self.graph.set_graph(QByteArray(svg), graph_targets(snapshot))
         return True
 
     def _ast_snapshot(self) -> dict[str, Any] | None:
@@ -335,5 +455,5 @@ class DataPane:
         svg = render_dot(path.read_text(encoding="utf-8"))
         if svg is None:
             return False
-        self.svg.load(QByteArray(svg))
+        self.graph.set_graph(QByteArray(svg), {})
         return True

@@ -123,8 +123,13 @@ class CodePane:
 
     def open_file(self, file: str) -> None:
         """Open one file of the source tree whole in its own tab (a source-tree click)."""
+        key = f"file:{file}"
+        existing = self._extras.get(key)
+        if existing is not None:
+            self.tabs.setCurrentWidget(existing)
+            return
         root = code_root(self.root)
-        self._open_extra(f"file:{file}", Path(file).name, self._whole_editor(file, root))
+        self._open_extra(key, Path(file).name, self._whole_editor(file, root))
 
     def open_example(self, loc: Loc, sources: Path) -> None:
         """Open the trace's copy of an example source at ``loc``'s line (D6).

@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -15,6 +15,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from tests.test_navigator import make_manifest
 from verdandi.provenance import Loc
 from verdandi.trace import CodeRef, Diff, ObjRef, Step, Trace, load, save
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QTreeWidgetItem
 
 HAVE_QT = importlib.util.find_spec("PySide6") is not None
 
@@ -80,6 +83,118 @@ def highlight_trace(directory: Path, span_paths: bool = False) -> Trace:
         )
     ]
     save(directory, make_manifest(), steps, {"s0001.json": snapshot}, sources)
+    return load(directory)
+
+
+def provenance_trace(directory: Path) -> Trace:
+    """An IR step and an AST step whose objects carry example-source locs (D5, D6)."""
+    source = directory.parent / "prov.v"
+    source.write_text(
+        "module prov;\nreg clk;\nassign clk = 0;\nendmodule\n", encoding="utf-8"
+    )
+    ir = ir_snapshot(
+        [
+            {
+                "name": "m",
+                "nodes": [
+                    {
+                        "id": 1,
+                        "name": "a",
+                        "type": "$dff",
+                        "params": {},
+                        "pins": [],
+                        "sources": [["examples/prov.v", 2, 5, 2, 8]],
+                    },
+                    {
+                        "id": 2,
+                        "name": "b",
+                        "type": "$not",
+                        "params": {},
+                        "pins": [],
+                        "sources": [],
+                    },
+                ],
+                "nets": [
+                    {
+                        "id": 20,
+                        "name": "n",
+                        "drivers": [1],
+                        "sinks": [2],
+                        "sources": [["examples/prov.v", 3, 8, 3, 11]],
+                    }
+                ],
+                "wires": [],
+            }
+        ]
+    )
+    ast = {
+        "kind": "ast",
+        "form": "ELABORATED",
+        "roots": [
+            {
+                "kind": "UNIT",
+                "sub": "",
+                "name": "prov.v",
+                "loc": "examples/prov.v:1:1",
+                "children": [
+                    {
+                        "kind": "MODULE",
+                        "sub": "",
+                        "name": "m",
+                        "loc": "examples/prov.v:1:1",
+                        "children": [
+                            {
+                                "kind": "DECLARATOR",
+                                "sub": "",
+                                "name": "clk",
+                                "loc": "examples/prov.v:2:5",
+                                "children": [],
+                            },
+                            {
+                                "kind": "IDENT",
+                                "sub": "",
+                                "name": "clk",
+                                "loc": "examples/prov.v:3:9",
+                                "children": [],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    diff = Diff(
+        added=[],
+        removed=[],
+        changed=[ObjRef("m", "node", 1, "a"), ObjRef("m", "net", 20, "n")],
+        by_name=False,
+    )
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=1,
+            title="opt",
+            anchor="pass:opt",
+            snapshot="s0001.json",
+            diff=diff,
+        ),
+        Step(
+            id="s0002",
+            parent=None,
+            level=2,
+            title="Elaborated",
+            anchor="pass:read_verilog",
+            snapshot="s0002.json",
+        ),
+    ]
+    save(
+        directory,
+        make_manifest(),
+        steps,
+        {"s0001.json": ir, "s0002.json": ast},
+        [source],
+    )
     return load(directory)
 
 
@@ -328,6 +443,14 @@ def depth_trace(directory: Path, root: Path) -> Trace:
         code=[CodeRef(file="src/a.c", line=9, end_line=12, function="top")],
     )
     return Trace(directory, make_manifest(), [step])
+
+
+def tree_child(item: QTreeWidgetItem | None, index: int = 0) -> QTreeWidgetItem:
+    """A tree item's child, asserting it exists (the AST trees in these tests are known)."""
+    assert item is not None
+    child = item.child(index)
+    assert child is not None
+    return child
 
 
 @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
@@ -658,6 +781,165 @@ class PaneTest(unittest.TestCase):
             self.assertEqual(item.text(), "1")
             pane.all_box.setChecked(True)
             self.assertEqual(pane.node_table.rowCount(), 2)
+
+    def test_provenance_badges_on_rows_trees_and_symbols(self) -> None:
+        """D5: every structure row carries its loc as a small badge."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            pane = DataPane()
+            pane.show(trace.steps[0], trace)
+            self.assertTrue(pane.provenance_box.isChecked())
+            self.assertEqual(pane.provenance_box.text(), "show all provenance")
+            header = pane.node_table.horizontalHeaderItem(4)
+            assert header is not None
+            self.assertEqual(header.text(), "Provenance")
+            node = pane.node_table.item(0, 4)
+            assert node is not None
+            self.assertEqual(node.text(), "prov.v:2")
+            net = pane.net_table.item(0, 4)
+            assert net is not None
+            self.assertEqual(net.text(), "prov.v:3")
+            pane.show(trace.steps[1], trace)
+            self.assertEqual(pane.ast_tree.headerItem().text(1), "Provenance")
+            module = tree_child(pane.ast_tree.topLevelItem(0))
+            declarator = tree_child(module)
+            self.assertEqual(declarator.text(1), "prov.v:2")
+            symbol = pane.symbol_table.item(0, 4)
+            assert symbol is not None
+            self.assertEqual(symbol.text(), "prov.v:2")
+
+    def test_provenance_toggle_hides_and_shows_badges(self) -> None:
+        """D5: one toggle hides the badge columns and drops them from the graph."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        dot_texts: list[str] = []
+
+        def capture(text: str) -> bytes:
+            dot_texts.append(text)
+            return svg
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "render_dot", side_effect=capture):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+                self.assertIn("FONT POINT-SIZE", dot_texts[-1])
+                pane.provenance_box.setChecked(False)
+                self.assertNotIn("FONT POINT-SIZE", dot_texts[-1])
+                self.assertTrue(pane.node_table.isColumnHidden(4))
+                self.assertTrue(pane.net_table.isColumnHidden(4))
+                pane.show(trace.steps[1], trace)
+                self.assertTrue(pane.ast_tree.isColumnHidden(1))
+                self.assertTrue(pane.symbol_table.isColumnHidden(4))
+                pane.provenance_box.setChecked(True)
+                self.assertFalse(pane.ast_tree.isColumnHidden(1))
+                module = tree_child(pane.ast_tree.topLevelItem(0))
+                self.assertEqual(tree_child(module).text(1), "prov.v:2")
+
+    def test_click_node_and_net_rows_open_the_loc(self) -> None:
+        """D6: a nodes or nets row click reports its source loc."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            pane = DataPane()
+            pane.on_source_clicked = opened.append
+            pane.show(trace.steps[0], trace)
+            pane.node_table.cellClicked.emit(0, 0)
+            pane.node_table.cellClicked.emit(0, 4)
+            pane.net_table.cellClicked.emit(0, 3)
+        self.assertEqual(
+            opened,
+            [
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 3, 3),
+            ],
+        )
+
+    def test_click_ast_and_symbol_cells_open_their_own_loc(self) -> None:
+        """D6: an AST node click and a symbol Declaration or Uses cell name their loc."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            pane = DataPane()
+            pane.on_source_clicked = opened.append
+            pane.show(trace.steps[1], trace)
+            module = tree_child(pane.ast_tree.topLevelItem(0))
+            declarator = tree_child(module)
+            pane.ast_tree.itemClicked.emit(declarator, 0)
+            pane.symbol_table.cellClicked.emit(0, 2)
+            pane.symbol_table.cellClicked.emit(0, 3)
+        self.assertEqual(
+            opened,
+            [
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 2, 2),
+                Loc("examples/prov.v", 3, 3),
+            ],
+        )
+
+    def test_click_without_a_loc_does_nothing(self) -> None:
+        """D6: an object with no loc reports nothing and raises nothing."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            pane = DataPane()
+            pane.on_source_clicked = opened.append
+            pane.show(trace.steps[0], trace)
+            pane.all_box.setChecked(True)
+            item = pane.node_table.item(1, 0)
+            assert item is not None
+            self.assertEqual(item.text(), "2")
+            pane.node_table.cellClicked.emit(1, 0)
+        self.assertEqual(opened, [])
+
+    def test_click_graph_node_opens_the_loc(self) -> None:
+        """D6: a click on a drawn graph node hits its SVG element and reports its loc."""
+        from PySide6.QtCore import QEvent, QPointF, Qt
+        from PySide6.QtGui import QMouseEvent
+
+        from verdandi.graph import node_element_id
+        from verdandi.gui import datapane
+
+        element = node_element_id("m", 1)
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" '
+            'viewBox="0 0 100 100">'
+            f'<g id="{element}"><rect x="0" y="0" width="80" height="80"/></g></svg>'
+        ).encode()
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = provenance_trace(Path(tmp) / "trace")
+            opened: list[Loc] = []
+            with mock.patch.object(datapane, "render_dot", return_value=svg):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+            pane.graph.resize(100, 100)
+            pane.on_source_clicked = opened.append
+
+            def click(x: float, y: float) -> None:
+                position = QPointF(x, y)
+                event = QMouseEvent(
+                    QEvent.Type.MouseButtonPress,
+                    position,
+                    position,
+                    Qt.MouseButton.LeftButton,
+                    Qt.MouseButton.LeftButton,
+                    Qt.KeyboardModifier.NoModifier,
+                )
+                pane.graph.mousePressEvent(event)
+
+            click(20, 20)
+            click(95, 95)
+        self.assertEqual(opened, [Loc("examples/prov.v", 2, 2)])
 
     def test_net_name_toggle(self) -> None:
         """The graph labels every net; the net-names checkbox hides the labels."""

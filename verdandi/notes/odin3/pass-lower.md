@@ -12,4 +12,5 @@ can be read back to the operator it came from. Asynchronous resets are made sync
 Parmys's `adff2dff` does; a falling-edge flip-flop is inverted by default.
 
 What to look for: `lower: module '<m>': $add '<cell>' -> N bit cells` for each word cell,
-then the summary `lowered N word cells to M bit cells`. In the playthrough, 5 to 192.
+then the summary `lowered N word cells to M bit cells`. In the playthrough on the k6
+architecture, 3 to 16 (counter2 1 to 4, ifelse_reg 2 to 12; mul4's multiply is hard-mapped).

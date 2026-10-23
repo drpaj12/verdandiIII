@@ -86,6 +86,13 @@ class NoteLoadTest(unittest.TestCase):
                 load_notes(directory)
             self.assertIn(path.name, str(raised.exception))
 
+    def test_empty_directory_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            with self.assertRaises(ValueError) as raised:
+                load_notes(directory)
+            self.assertIn(tmp, str(raised.exception))
+
     def test_stale_pass_flagged(self) -> None:
         notes = {
             "pass:nope": "x",

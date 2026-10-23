@@ -36,13 +36,16 @@ def load_notes(directory: Path) -> dict[str, str]:
 
     Each ``*.md`` file must hold the format above; a file without the anchor line, without the
     blank line after it, with more than ``MAX_BODY_LINES`` lines, or with an anchor another file
-    already used raises ``ValueError`` naming the file. A missing directory raises too: an empty
-    list of notes is never what a user meant to check.
+    already used raises ``ValueError`` naming the file. A missing directory raises too, and so
+    does one with no ``*.md`` file: an empty list of notes is never what a user meant to check.
     """
     if not directory.is_dir():
         raise ValueError(f"{directory}: not a notes directory")
+    paths = sorted(directory.glob("*.md"))
+    if not paths:
+        raise ValueError(f"{directory}: no note files (*.md) in the notes directory")
     notes: dict[str, str] = {}
-    for path in sorted(directory.glob("*.md")):
+    for path in paths:
         anchor, body = _parse_note(path)
         if anchor in notes:
             raise ValueError(f"{path}: the anchor {anchor!r} is already used by another note")

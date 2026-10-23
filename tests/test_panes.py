@@ -500,7 +500,12 @@ class PaneTest(unittest.TestCase):
             with mock.patch.object(datapane, "render_dot", return_value=svg):
                 pane = datapane.DataPane()
                 pane.show(trace.steps[0], trace)
-        self.assertEqual(pane.badge.text(), "ABC network (picture)")
+            self.assertEqual(pane.badge.text(), "ABC network (picture)")
+            with mock.patch.object(datapane, "which", return_value=None):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+            self.assertEqual(pane.badge.text(), "ABC network (picture)")
+            self.assertFalse(pane.has_graph())
 
     def test_structure_badge_log_event(self) -> None:
         """An L3 event has no snapshot: the badge says so and no structure tab shows."""

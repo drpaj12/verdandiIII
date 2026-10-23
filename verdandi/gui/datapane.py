@@ -162,10 +162,11 @@ class DataPane:
         self.symbol_table.setRowCount(0)
         self._set_tabs(nodes=False, nets=False, ast=False, symbols=False, graph=False)
         self._structure = NO_STRUCTURE
-        if self._step.picture is not None and self._render_picture(self._step.picture):
+        if self._step.picture is not None:
             self._structure = "ABC network (picture)"
-            self._set_tabs(nodes=False, nets=False, ast=False, symbols=False, graph=True)
-            self.tabs.setCurrentWidget(self._graph_page)
+            if self._render_picture(self._step.picture):
+                self._set_tabs(nodes=False, nets=False, ast=False, symbols=False, graph=True)
+                self.tabs.setCurrentWidget(self._graph_page)
         snapshot = self._trace.snapshot(self._step)
         if snapshot is None:
             self._sync_badge()

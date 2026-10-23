@@ -40,7 +40,8 @@ class GuiSmokeTest(unittest.TestCase):
             self.assertEqual(len(window.stage_buttons), 3)
             self.assertEqual(window.model.rowCount(), 3)
             self.assertEqual(
-                set(window.docks), {"Verilog", "Code", "Data", "Explanation", "Diff"}
+                set(window.docks),
+                {"Verilog", "Code", "Data", "Explanation", "Diff", "Source"},
             )
 
             def focused() -> QWidget:

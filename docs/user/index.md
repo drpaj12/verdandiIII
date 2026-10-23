@@ -88,10 +88,14 @@ steps at every level. The panes follow the selected step:
 - **Verilog** shows the recorded source with the provenance spans of the touched objects
   highlighted.
 - **Code** shows the Odin III source file that registers the pass, at the function that runs it
-  (root from the `codeRoot` app setting, else `$ODIN3_ROOT`).
+  (root from the `codeRoot` app setting, else `$ODIN3_ROOT`). A click on a data-pane object opens
+  the trace's copy of the example source at that object's line in its own tab, beside the step's
+  source tabs.
 - **Data** shows the snapshot's tables, filtered to the touched objects by default, an AST tree
-  for the Parse and Elaborate steps, and a graph picture of the touched slice when `dot` is
-  installed.
+  for the Parse and Elaborate steps, a symbol table, and a graph picture of the touched slice when
+  `dot` is installed. Every node and table row carries its source line as a small grey provenance
+  badge (the "show all provenance" checkbox hides them), and a click on a graph node, a table row
+  or cell, or an AST node opens the example source at that loc's line in the Code pane.
 - **Explanation** shows the note for the step, else a generated summary of its diff.
 - The **Diff** strip counts what the step added (green), removed (red) and changed (amber).
 

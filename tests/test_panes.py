@@ -326,6 +326,27 @@ class PaneTest(unittest.TestCase):
             pane.all_box.setChecked(True)
             self.assertEqual(pane.node_table.rowCount(), 2)
 
+    def test_net_name_toggle(self) -> None:
+        """The graph labels every net; the net-names checkbox hides the labels."""
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        dot_texts: list[str] = []
+
+        def capture(text: str) -> bytes:
+            dot_texts.append(text)
+            return svg
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = data_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "render_dot", side_effect=capture):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+                self.assertIn('label="q"', dot_texts[-1])
+                pane.net_names_box.setChecked(False)
+                self.assertNotIn('label="q"', dot_texts[-1])
+        self.assertEqual(len(dot_texts), 2)
+
     def test_data_picture_only_step(self) -> None:
         """An ABC step has a picture and no snapshot; the picture must still render."""
         from verdandi.gui import datapane

@@ -18,6 +18,7 @@ from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QHBoxLayout,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -85,6 +86,13 @@ class DataPane:
     def __init__(self) -> None:
         self.widget = QWidget()
         self.all_box = QCheckBox("all objects")
+        self.net_names_box = QCheckBox("net names")
+        self.net_names_box.setChecked(True)
+        controls = QWidget()
+        controls_layout = QHBoxLayout(controls)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.addWidget(self.all_box)
+        controls_layout.addWidget(self.net_names_box)
         self.tabs = QTabWidget()
         self.node_table = _table(NODE_HEADERS)
         self.net_table = _table(NET_HEADERS)
@@ -100,11 +108,12 @@ class DataPane:
         self.tabs.addTab(self.ast_tree, "AST")
         self.tabs.addTab(self._graph_page, "Graph")
         layout = QVBoxLayout(self.widget)
-        layout.addWidget(self.all_box)
+        layout.addWidget(controls)
         layout.addWidget(self.tabs, 1)
         self._step: Step | None = None
         self._trace: Trace | None = None
         self.all_box.toggled.connect(self._rerender)
+        self.net_names_box.toggled.connect(self._rerender)
 
     def show(self, step: Step, trace: Trace) -> None:
         self._step = step
@@ -186,7 +195,9 @@ class DataPane:
     def _render_slice(self, snapshot: dict[str, Any], diff: Diff | None) -> None:
         if diff is None or not (diff.added or diff.removed or diff.changed):
             return
-        svg = render_dot(slice_dot(snapshot, diff))
+        svg = render_dot(
+            slice_dot(snapshot, diff, show_net_names=self.net_names_box.isChecked())
+        )
         if svg is None:
             return
         self.svg.load(QByteArray(svg))

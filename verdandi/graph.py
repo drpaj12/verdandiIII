@@ -3,8 +3,10 @@
 Pure: no Qt and no Graphviz call. A node is keyed by ``(module, id)``; two nodes are neighbours
 when one net connects them (any pin of the one to any pin of the other). The slice is the diff's
 touched nodes plus ``rings`` rings of neighbours; only nets with both ends inside the slice become
-edges, so the picture shows the touched objects and their immediate wiring. The Data pane renders
-this text with ``dot -Tsvg`` when Graphviz is installed.
+edges, so the picture shows the touched objects and their immediate wiring. Every edge carries
+its net's name as the label; an unnamed internal net is labelled ``net <id>``, and
+``show_net_names=False`` drops the labels. An unnamed node is labelled by its key. The Data pane
+renders this text with ``dot -Tsvg`` when Graphviz is installed.
 """
 
 from __future__ import annotations
@@ -14,12 +16,18 @@ from typing import Any
 from verdandi.trace import Diff
 
 NodeKey = tuple[str, int]
-Edge = tuple[NodeKey, NodeKey, str]
+# Driver, sink, net name, net id.
+Edge = tuple[NodeKey, NodeKey, str, int]
 
 
 def _quote(text: str) -> str:
     """A double-quoted dot string with backslashes and quotes escaped."""
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def net_label(net_name: str, net_id: int) -> str:
+    """The edge label of a net: its name, else ``net <id>`` for an unnamed internal net."""
+    return net_name or f"net {net_id}"
 
 
 def _module_parts(
@@ -33,8 +41,8 @@ def _module_parts(
     """One module's node names, adjacency, drawing edges and each net's connected nodes.
 
     Adjacency is undirected (every pair of pins on the same net); an edge is directed driver to
-    sink and carries the net name. A pin naming a node outside the module is skipped, as the
-    recorder's snapshot never holds one.
+    sink and carries the net name and id. A pin naming a node outside the module is skipped, as
+    the recorder's snapshot never holds one.
     """
     name = str(module.get("name", ""))
     names: dict[NodeKey, str] = {}
@@ -51,6 +59,7 @@ def _module_parts(
             key for key in ((name, int(ident)) for ident in net.get("sinks", [])) if key in names
         ]
         net_name = str(net.get("name", ""))
+        net_id = int(net["id"])
         ends = drivers + sinks
         for index, first in enumerate(ends):
             for second in ends[index + 1 :]:
@@ -58,17 +67,21 @@ def _module_parts(
                 neighbours[second].add(first)
         for driver in drivers:
             for sink in sinks:
-                edges.add((driver, sink, net_name))
-        ends_by_net[(name, int(net["id"]))] = set(ends)
+                edges.add((driver, sink, net_name, net_id))
+        ends_by_net[(name, net_id)] = set(ends)
     return names, neighbours, edges, ends_by_net
 
 
-def slice_dot(snapshot: dict[str, Any], diff: Diff, rings: int = 1) -> str:
+def slice_dot(
+    snapshot: dict[str, Any], diff: Diff, rings: int = 1, *, show_net_names: bool = True
+) -> str:
     """The dot digraph of the diff's touched nodes plus ``rings`` rings of neighbours.
 
     A ``node`` ref is itself; a ``net`` ref contributes its connected nodes (the endpoints are
-    what the picture can draw); a ``wire`` ref has no graph connections. Deterministic: node
-    lines sorted by ``(module, id)`` and edges by their three fields.
+    what the picture can draw); a ``wire`` ref has no graph connections. Every drawn edge is
+    labelled with its net's name, or ``net <id>`` when the net has none, unless
+    ``show_net_names`` is false. Deterministic: node lines sorted by ``(module, id)`` and edges
+    by their fields.
     """
     if snapshot.get("kind") != "ir":
         raise ValueError("slice_dot: only an IR snapshot has a graph")
@@ -96,12 +109,16 @@ def slice_dot(snapshot: dict[str, Any], diff: Diff, rings: int = 1) -> str:
         touched = grown
     lines = ["digraph slice {"]
     for key in sorted(touched):
-        lines.append(f"  {_quote(f'{key[0]}:{key[1]}')} [label={_quote(names[key])}];")
-    for driver, sink, net_name in sorted(edges):
+        label = names[key] or f"{key[0]}:{key[1]}"
+        lines.append(f"  {_quote(f'{key[0]}:{key[1]}')} [label={_quote(label)}];")
+    for driver, sink, net_name, net_id in sorted(edges):
         if driver in touched and sink in touched:
+            attributes = (
+                f" [label={_quote(net_label(net_name, net_id))}]" if show_net_names else ""
+            )
             lines.append(
                 f"  {_quote(f'{driver[0]}:{driver[1]}')} -> "
-                f"{_quote(f'{sink[0]}:{sink[1]}')} [label={_quote(net_name)}];"
+                f"{_quote(f'{sink[0]}:{sink[1]}')}{attributes};"
             )
     lines.append("}")
     return "\n".join(lines) + "\n"

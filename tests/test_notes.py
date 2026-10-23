@@ -137,6 +137,8 @@ class NoteLoadTest(unittest.TestCase):
         notes = {
             "rule:opt_expr:const_and": "x",
             "rule:opt_expr:no_such_rule": "x",
+            "rule:flatten:renamed": "x",
+            "rule:lower:lowered": "x",
         }
         anchors = stale(notes, set(), Locator(ODIN3_ROOT), set())
         self.assertEqual(anchors, ["rule:opt_expr:no_such_rule"])

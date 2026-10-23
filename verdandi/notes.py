@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from verdandi.odin3.abcsteps import abc_script
+from verdandi.odin3.events import rule_tokens
 from verdandi.odin3.locator import Locator
 
 # The note file format (spec 3; plan Task 9): an anchor line, a blank line, at most this many
@@ -63,10 +64,11 @@ def stale(
 
     ``pass:`` is checked against the build's pass names, ``stage:`` against the stage map,
     ``abc:`` against the command words of the current ABC script, ``rule:`` against the
-    rule-name literals of its pass's source, and ``func:`` against the C function definitions of
-    the pass and front-end roots. Without a source tree the function and rule anchors cannot be
-    checked and are left alone; the shipped notes carry none, so a tree-less check still means
-    something. An anchor of no known kind is stale.
+    rule-name literals of its pass's source and the fixed rule tokens of its event patterns,
+    and ``func:`` against the C function definitions of the pass and front-end roots. Without a
+    source tree the function and rule anchors cannot be checked and are left alone; the shipped
+    notes carry none, so a tree-less check still means something. An anchor of no known kind is
+    stale.
     """
     words = _abc_words(locator)
     anchors: list[str] = []
@@ -125,14 +127,18 @@ def _function_exists(name: str, locator: Locator) -> bool:
 
 
 def _rule_exists(rest: str, locator: Locator) -> bool:
-    """True when a pass's source holds a string literal for a ``rule:<pass>:<rule>`` anchor.
+    """True when a pass's source or event patterns back a ``rule:<pass>:<rule>`` anchor.
 
-    Rule names are runtime values in the DEBUG format, so the format text does not hold them;
-    the pass's rule-name table does, as one C string literal per rule.
+    A rule name the pass logs is a runtime value in its DEBUG format, so the format text does
+    not hold it; the pass's rule-name table does, as one C string literal per rule. A rule token
+    the event patterns name themselves (the format's fixed rule, such as ``lowered``) is backed
+    by ``events.rule_tokens``.
     """
     pass_name, _, rule = rest.partition(":")
     if not pass_name or not rule:
         return False
     if locator.root is None:
+        return True
+    if rule in rule_tokens(pass_name):
         return True
     return locator.has_literal(locator.pass_files(pass_name), rule)

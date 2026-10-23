@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import Counter
 from pathlib import Path
 
-from verdandi.odin3.record import record
+from verdandi.notes import load_notes, shipped_dir, stale
+from verdandi.odin3.locator import Locator
+from verdandi.odin3.record import record, stage_map
 from verdandi.trace import _checked_name, load
 
 SUBCOMMANDS = {
@@ -38,6 +41,10 @@ def build_parser() -> argparse.ArgumentParser:
     record_parser.add_argument("--script", type=Path, metavar="FILE")
     record_parser.add_argument("--max-nodes", type=int, default=5000, metavar="N")
     record_parser.add_argument("-o", "--out", type=Path, required=True, metavar="TRACE")
+    notes_parser = parsers["check-notes"]
+    notes_parser.add_argument("--odin3-root", type=Path, metavar="DIR")
+    notes_parser.add_argument("--notes", type=Path, metavar="DIR")
+    parsers["play"].add_argument("trace", type=Path, metavar="TRACE")
     parsers["info"].add_argument("trace", type=Path, metavar="TRACE")
     return parser
 
@@ -88,11 +95,77 @@ def _info(args: argparse.Namespace) -> int:
     return 0
 
 
+def _odin3_root(argument: Path | None) -> Path | None:
+    """The source tree to check against: ``--odin3-root``, else $ODIN3_ROOT when it is a dir.
+
+    An explicit ``--odin3-root`` that is not a directory raises ValueError: falling back to no
+    tree would silently leave every ``func:`` and ``rule:`` anchor unchecked.
+    """
+    if argument is not None:
+        if not argument.is_dir():
+            raise ValueError(f"{argument}: not a source tree")
+        return argument
+    value = os.environ.get("ODIN3_ROOT")
+    if value:
+        root = Path(value)
+        if root.is_dir():
+            return root
+    return None
+
+
+def _registered_passes() -> set[str]:
+    """The pass names the build registers (spec 8: pass notes checked against Odin3.passes())."""
+    try:
+        import odin3
+
+        names = odin3.default().passes()
+    except Exception as exc:
+        raise RuntimeError(f"the odin3 library is not available ({exc})") from exc
+    return set(names)
+
+
+def _check_notes(args: argparse.Namespace) -> int:
+    directory = args.notes if args.notes is not None else shipped_dir()
+    try:
+        notes = load_notes(directory)
+        root = _odin3_root(args.odin3_root)
+        titles = set(stage_map()[1].values())
+        passes = _registered_passes()
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"verdandi check-notes: {exc}", file=sys.stderr)
+        return 2
+    locator = Locator(root)
+    anchors = stale(notes, passes, locator, titles)
+    for anchor in anchors:
+        print(f"{anchor}: stale")
+    if anchors:
+        print(f"{len(anchors)} stale of {len(notes)} notes")
+        return 1
+    print(f"{len(notes)} notes, no stale anchors")
+    return 0
+
+
+def _play(args: argparse.Namespace) -> int:
+    try:
+        trace = load(args.trace)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"verdandi play: {exc}", file=sys.stderr)
+        return 2
+    try:
+        from verdandi.gui.app import player
+
+        return player(trace)
+    except ImportError as exc:
+        print(f"verdandi play: the player needs PySide6 ({exc})", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "record":
-        return _record(args)
-    if args.command == "info":
-        return _info(args)
-    print(f"verdandi {args.command}: not implemented yet")
-    return 2
+    handlers = {
+        "record": _record,
+        "play": _play,
+        "check-notes": _check_notes,
+        "info": _info,
+    }
+    return handlers[args.command](args)

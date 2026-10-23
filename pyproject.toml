@@ -15,6 +15,7 @@ gui = ["PySide6>=6.6"]
 
 [project.scripts]
 verdandi = "verdandi.cli:main"
+verdandi-gui = "verdandi.gui.app:main"
 
 [tool.setuptools.packages.find]
 include = ["verdandi*"]
@@ -22,6 +23,8 @@ include = ["verdandi*"]
 [tool.setuptools.package-data]
 # The stage map is read at record time; without this a non-editable wheel omits it.
 "verdandi.odin3" = ["stages.json"]
+# The notes are read by check-notes and by the player; a wheel must carry them too.
+"verdandi" = ["notes/odin3/*.md"]
 
 [tool.ruff]
 line-length = 100

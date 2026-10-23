@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,8 @@ from typing import Any
 
 from verdandi.cli import main
 from verdandi.trace import FORMAT_VERSION, Manifest, Step, save
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def make_manifest() -> Manifest:
@@ -68,20 +72,49 @@ class CliTest(unittest.TestCase):
             main(["nope"])
         self.assertEqual(ex.exception.code, 2)
 
-    def test_subcommands_not_implemented_yet(self) -> None:
-        # Every subcommand is still unwired at Task 1; drop each name from this
-        # loop in the task that wires it: Task 6 wires record and info, Task 9
-        # wires check-notes, Task 10 wires play.
-        unwired = ("play", "check-notes")
-        for name in unwired:
-            with self.subTest(name=name):
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    code = main([name])
-                self.assertEqual(code, 2)
-                self.assertEqual(out.getvalue().strip(),
-                                 f"verdandi {name}: not implemented yet")
+    def test_play_requires_a_trace(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as ex:
+            main(["play"])
+        self.assertEqual(ex.exception.code, 2)
 
+    def test_play_bad_trace_is_usage_error(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            code = main(["play", "/nonexistent/verdandi-trace"])
+        self.assertEqual(code, 2)
+        self.assertIn("verdandi play:", stderr.getvalue())
+
+    def test_play_empty_trace_is_usage_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "trace"
+            save(directory, make_manifest(), [], {}, [])
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = main(["play", str(directory)])
+            self.assertEqual(code, 2)
+            self.assertIn("verdandi play:", stderr.getvalue())
+            self.assertIn("no steps", stderr.getvalue())
+
+
+    def test_gui_without_pyside6_is_a_clean_error(self) -> None:
+        code = (
+            "import sys\n"
+            "for name in ('PySide6', 'PySide6.QtCore', 'PySide6.QtWidgets'):\n"
+            "    sys.modules[name] = None\n"
+            "from verdandi.gui.app import main\n"
+            "raise SystemExit(main(['/nonexistent/verdandi-trace']))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("verdandi-gui:", result.stderr)
+        self.assertIn('pip install "verdandi[gui]"', result.stderr)
 
     def test_info_valid_trace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

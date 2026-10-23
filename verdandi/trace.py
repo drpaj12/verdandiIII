@@ -205,6 +205,8 @@ def load(directory: Path) -> Trace:
     steps_data = json.loads((directory / "steps.json").read_text(encoding="utf-8"))
     if not isinstance(steps_data, list):
         raise ValueError("steps.json is not a JSON array")
+    if not steps_data:
+        raise ValueError("the trace has no steps")
     steps = [_step_from_dict(item) for item in steps_data]
     return Trace(directory, _manifest_from_dict(manifest_data), steps)
 

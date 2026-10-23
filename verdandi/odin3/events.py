@@ -254,6 +254,20 @@ PATTERNS: dict[str, list[re.Pattern[str]]] = {
 }
 
 
+def rule_tokens(pass_name: str) -> set[str]:
+    """The anchor rule tokens of a pass's patterns that are fixed, not a matched group.
+
+    A pattern without a ``rule`` group anchors to the format's rule token (``lowered``,
+    ``renamed``); one with the group anchors to the value the pass logs (``const_and``), which
+    the source's rule-name table holds instead.
+    """
+    return {
+        rule
+        for pattern, _prefix, rule in _ROWS.get(pass_name, [])
+        if "rule" not in pattern.groupindex
+    }
+
+
 def match(pass_name: str, line: str) -> tuple[str, str, str] | None:
     """The line's event as (title, anchor, format prefix), or None when no pattern matches.
 

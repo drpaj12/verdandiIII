@@ -7,8 +7,10 @@ manuals are linked in the sidebar.
 
 A recording is a **trace**: a directory holding the source, one snapshot of the design after
 every step, the diff from the step before, the provenance spans of the objects that changed, the
-source code location of the pass, its log lines, and the note that explains it. The player reads
-only the trace, so it never runs Odin III itself.
+source code location of the pass, and its log lines. The notes that explain the steps ship with
+Verdandi (`verdandi/notes/odin3`), not with the trace, and the player looks one up by the step's
+anchor. The player reads only the trace and those notes, so it never runs Odin III itself; only
+the Code pane reads the Odin III source tree.
 
 This page walks the shipped example: record it, play it, and see what every level and every key
 shows. The one-page commands are also in `examples/playthrough/README.md`.
@@ -59,7 +61,8 @@ With Odin III v1.0.0 and the k6 architecture the recording has 83 steps: 13 stag
 sub-steps and 15 logged events. It exits 0. A pass that fails ends the recording with that step
 marked failed and its log kept, and exits 1; a usage or environment error exits 2.
 
-The trace directory is readable on any machine with Odin III at the recorded commit:
+The trace directory is portable: the player needs no Odin III to read it, and only the Code pane
+needs the Odin III source, at the recorded commit. The directory holds:
 
     trace/manifest.json   format version, Odin III version and source commit, files, top, arch, script
     trace/steps.json      the step tree: id, parent, level, title, anchor, snapshot, diff, code, log
@@ -97,11 +100,11 @@ opening a window.
 | `O` or `Backspace` | step out (the parent, else stay) |
 | `B` | back (the previous position; the trace is recorded, so back is free) |
 | `1` to `9` | jump to that stage (the stage map's first nine boxes) |
-| `Ctrl+F` | follow an object name typed in the follow box; press again for the next match |
+| `Ctrl+F` | focus the follow box (Enter follows it); press again for the next match |
 
 Follow matches every step whose diff names the object (a node, a net or a wire), in recorded
-order; the follow box is filled with the name when you press `Ctrl+F`, so type it there and press
-`Enter` first, or press `Ctrl+F` again to cycle.
+order. `Ctrl+F` focuses the follow box and selects its text; type a name and press `Enter` to
+follow it, or press `Ctrl+F` again to cycle to the next match.
 
 ### The levels
 
@@ -116,7 +119,8 @@ A playthrough is a tree of four levels (the player's step tree shows all of them
 - **L2 sub-step**: a pass's documented parts, run one by one on a copy of the design: `proc`
   stops after each of its clean, rmdead, prune and arst phases and then the real `proc`; `opt`
   shows its parts in source order (`opt_expr`, `opt_merge -nomux`, then each iteration's
-  `opt_muxtree`, `opt_reduce`, `opt_merge`, `opt_dff`, `opt_clean`); `fsm_detect` then `fsm`;
+  `opt_muxtree`, `opt_reduce`, `opt_merge`, `opt_share` with `-full`, `opt_dff`, `opt_clean`,
+  `opt_expr`); `fsm_detect` then `fsm`;
   Parse and Elaborate from the PARSED and ELABORATED ASTs; and one step per ABC command (below).
   A copy whose result differs from the real pass marks the step "illustration".
 - **L3 event**: one logged action inside a step, parsed from the pass's DEBUG log lines, e.g.

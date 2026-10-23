@@ -42,6 +42,23 @@ def stages() -> dict[str, str]:
     }
 
 
+def script_stages(script: str) -> list[tuple[str, list[str]]]:
+    """The script's stage runs: (stage title, pass names), one run per consecutive stage.
+
+    The script is split on ``;`` exactly as the recorder does, each command's pass name mapped
+    through the stage map, and a command the map does not list gets a stage titled by its name.
+    """
+    titles = stages()
+    runs: list[tuple[str, list[str]]] = []
+    for command in (part.strip() for part in script.split(";") if part.strip()):
+        name = command.split(maxsplit=1)[0]
+        title = titles.get(name, name)
+        if not runs or runs[-1][0] != title:
+            runs.append((title, []))
+        runs[-1][1].append(name)
+    return runs
+
+
 def run_main(argv: list[str]) -> tuple[int, str]:
     """Run the CLI in-process and return its exit code and stdout."""
     out = io.StringIO()
@@ -70,25 +87,22 @@ class PlaythroughTest(unittest.TestCase):
             self.assertEqual(code, 0, "the playthrough did not record")
             trace = load(out)
             self.assertGreater(len(trace.steps), 30, "the trace has 30 steps or fewer")
-            titles = stages()
-            reached = {
-                titles.get(step.anchor.removeprefix("pass:"), step.anchor.removeprefix("pass:"))
-                for step in trace.steps
-                if step.level == 1 and step.anchor is not None
-            }
-            self.assertIn("Read architecture", reached)
-            for root in trace.children(None):
+            runs = script_stages(trace.manifest.script)
+            self.assertTrue(runs, "the manifest script has no commands")
+            roots = trace.children(None)
+            self.assertEqual(
+                [root.title for root in roots],
+                [title for title, _ in runs],
+                "the L0 stages do not follow the recorded script",
+            )
+            for root, (_, names) in zip(roots, runs, strict=True):
                 self.assertEqual(root.level, 0, root.title)
-                if root.title in reached:
-                    passes = [
-                        step
-                        for step in trace.children(root.id)
-                        if step.level == 1
-                    ]
-                    self.assertTrue(passes, f"stage {root.title!r} has no L1 step")
-            roots = {step.title for step in trace.children(None)}
-            missing = sorted(reached - roots)
-            self.assertEqual(missing, [], f"no L0 stage step for {missing}")
+                anchors = [step.anchor for step in trace.children(root.id) if step.level == 1]
+                self.assertEqual(
+                    anchors,
+                    [f"pass:{name}" for name in names],
+                    f"stage {root.title!r} has no L1 step for every command",
+                )
             if arch is not None and HAVE_ABC:
                 abc = [
                     step

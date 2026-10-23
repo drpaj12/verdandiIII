@@ -1,8 +1,8 @@
 name: Docs (GitHub Pages)
 
 # Publishes the Verdandi III user manual (docs/user, Sphinx) to https://drpaj12.github.io/verdandiIII/
-# on every push to main. The build is the CI docs job's (warnings are errors); this workflow only
-# adds the deploy.
+# on every push to main. No CI job builds the docs (ci.yml has only lint and test), so this
+# workflow builds them with warnings as errors and deploys the result.
 on:
   push:
     branches: [main]

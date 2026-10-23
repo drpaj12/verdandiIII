@@ -119,6 +119,83 @@ def data_trace(directory: Path) -> Trace:
     return load(directory)
 
 
+def ast_trace(directory: Path, form: str = "ELABORATED") -> Trace:
+    """One AST step: module m declares input clk and uses it on a line below."""
+    snapshot = {
+        "kind": "ast",
+        "form": form,
+        "roots": [
+            {
+                "kind": "UNIT",
+                "sub": "",
+                "name": "m.v",
+                "loc": "m.v:1:1",
+                "children": [
+                    {
+                        "kind": "MODULE",
+                        "sub": "",
+                        "name": "m",
+                        "loc": "m.v:1:1",
+                        "children": [
+                            {
+                                "kind": "LIST",
+                                "sub": "",
+                                "name": "",
+                                "loc": "m.v:1:10",
+                                "children": [
+                                    {
+                                        "kind": "PORT_DECL",
+                                        "sub": "input",
+                                        "name": "",
+                                        "loc": "m.v:1:11",
+                                        "children": [
+                                            {
+                                                "kind": "DECLARATOR",
+                                                "sub": "",
+                                                "name": "clk",
+                                                "loc": "m.v:1:17",
+                                                "children": [],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            {
+                                "kind": "CONT_ASSIGN",
+                                "sub": "",
+                                "name": "",
+                                "loc": "m.v:2:1",
+                                "children": [
+                                    {
+                                        "kind": "IDENT",
+                                        "sub": "",
+                                        "name": "clk",
+                                        "loc": "m.v:2:11",
+                                        "children": [],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    steps = [
+        Step(
+            id="s0001",
+            parent=None,
+            level=2,
+            title=form.title(),
+            anchor="pass:read_verilog",
+            snapshot="s0001.json",
+            diff=Diff(added=[], removed=[], changed=[], by_name=False),
+        )
+    ]
+    save(directory, make_manifest(), steps, {"s0001.json": snapshot}, [])
+    return load(directory)
+
+
 def picture_trace(directory: Path) -> Trace:
     """An ABC step: a picture and no snapshot."""
     dot = directory.parent / "abc.dot"
@@ -346,6 +423,81 @@ class PaneTest(unittest.TestCase):
                 pane.net_names_box.setChecked(False)
                 self.assertNotIn('label="q"', dot_texts[-1])
         self.assertEqual(len(dot_texts), 2)
+
+    def test_structure_badge_per_step_kind(self) -> None:
+        """D3: the badge names the structure the pane shows; the symbol tab says so."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ir_trace = data_trace(Path(tmp) / "ir")
+            pane = DataPane()
+            pane.show(ir_trace.steps[0], ir_trace)
+            self.assertEqual(pane.badge.objectName(), "structure-badge")
+            self.assertEqual(pane.badge.text(), "IR after opt (netlist)")
+            parsed = ast_trace(Path(tmp) / "parsed", "PARSED")
+            pane.show(parsed.steps[0], parsed)
+            self.assertEqual(pane.badge.text(), "AST (parsed)")
+            self.assertIs(pane.tabs.currentWidget(), pane.ast_tree)
+            elaborated = ast_trace(Path(tmp) / "elaborated")
+            pane.show(elaborated.steps[0], elaborated)
+            self.assertEqual(pane.badge.text(), "AST (elaborated)")
+            pane.tabs.setCurrentWidget(pane.symbol_table)
+            self.assertEqual(pane.badge.text(), "symbol table")
+
+    def test_structure_badge_picture(self) -> None:
+        from verdandi.gui import datapane
+
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>'
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = picture_trace(Path(tmp) / "trace")
+            with mock.patch.object(datapane, "render_dot", return_value=svg):
+                pane = datapane.DataPane()
+                pane.show(trace.steps[0], trace)
+        self.assertEqual(pane.badge.text(), "ABC network (picture)")
+
+    def test_structure_badge_log_event(self) -> None:
+        """An L3 event has no snapshot: the badge says so and no structure tab shows."""
+        from verdandi.gui.datapane import DataPane
+
+        event = Step(
+            id="s0001",
+            parent=None,
+            level=3,
+            title="opt_clean: removing unused $mux '$c8'",
+            anchor="rule:opt_clean:removing_unused",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = Trace(Path(tmp) / "trace", make_manifest(), [event])
+            pane = DataPane()
+            pane.show(event, trace)
+        self.assertEqual(pane.badge.text(), "log event (no snapshot)")
+        self.assertFalse(pane.tabs.isTabVisible(pane.tabs.indexOf(pane.node_table)))
+
+    def test_symbol_table_view(self) -> None:
+        """D3: the symbol table lists scope, name, declaration and uses of the AST."""
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = ast_trace(Path(tmp) / "trace")
+            pane = DataPane()
+            pane.show(trace.steps[0], trace)
+        self.assertTrue(pane.tabs.isTabVisible(pane.tabs.indexOf(pane.symbol_table)))
+        self.assertEqual(pane.symbol_table.rowCount(), 1)
+        values = []
+        for column in range(4):
+            item = pane.symbol_table.item(0, column)
+            assert item is not None
+            values.append(item.text())
+        self.assertEqual(values, ["m", "clk", "m.v:1:17", "m.v:2:11"])
+
+    def test_symbol_table_hidden_for_ir_step(self) -> None:
+        from verdandi.gui.datapane import DataPane
+
+        with tempfile.TemporaryDirectory() as tmp:
+            trace = data_trace(Path(tmp) / "trace")
+            pane = DataPane()
+            pane.show(trace.steps[0], trace)
+        self.assertFalse(pane.tabs.isTabVisible(pane.tabs.indexOf(pane.symbol_table)))
 
     def test_data_picture_only_step(self) -> None:
         """An ABC step has a picture and no snapshot; the picture must still render."""

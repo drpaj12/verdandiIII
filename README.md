@@ -5,8 +5,8 @@ Odin III pass by pass into a trace, then replay it as an interactive playthrough
 code, the data and the Verilog provenance of every step. Python 3.11+, `odin3` (cffi binding) for
 the recorder, PySide6 (extra `gui`) for the player. Verdandi III is part of **Yggdrasil III**, the
 suite of Odin III (<https://github.com/drpaj12/odin3>), Wyrd III
-(<https://github.com/drpaj12/wyrd>), Loki III (<https://github.com/drpaj12/loki>) and Midgard III
-(the Verilog Town game).
+(<https://github.com/drpaj12/wyrd>), Loki III (<https://github.com/drpaj12/loki>), The Norns III
+(<https://github.com/drpaj12/nornsIII>) and Midgard III (the Verilog Town game).
 
 ## Quick start
 
@@ -35,3 +35,8 @@ Start at the Yggdrasil III hub; every manual links to the others.
 - [Loki III manual](https://drpaj12.github.io/loki/).
 - [Verdandi III manual](https://drpaj12.github.io/verdandiIII/): this tool, with the shipped
   [playthrough example](examples/playthrough/README.md).
+- [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan and paper under `docs/`).
+- [Set up the whole suite](https://drpaj12.github.io/YggdrasilIII/getting-started.html) on a clean Linux or
+  Windows machine, and [drive it with Claude Code](https://drpaj12.github.io/YggdrasilIII/ai-agent.html).
+
+Design: [spec](docs/specs/2026-10-22-verdandi-design.md) and [plan](docs/plans/2026-10-22-verdandi-plan.md).

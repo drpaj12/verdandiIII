@@ -3,10 +3,7 @@
 Verdandi III: the Micro through the Macro. Record a micro Verilog design through the current
 Odin III pass by pass into a trace, then replay it as an interactive playthrough that shows the
 code, the data and the Verilog provenance of every step. Python 3.11+, `odin3` (cffi binding) for
-the recorder, PySide6 (extra `gui`) for the player. Verdandi III is part of **Yggdrasil III**, the
-suite of Odin III (<https://github.com/drpaj12/odin3>), Wyrd III
-(<https://github.com/drpaj12/wyrd>), Loki III (<https://github.com/drpaj12/loki>), The Norns III
-(<https://github.com/drpaj12/nornsIII>) and Midgard III (the Verilog Town game).
+the recorder, PySide6 (extra `gui`) for the player. Verdandi III is part of **Yggdrasil III**, the suite of Odin III (<https://github.com/drpaj12/odin3>, the trunk), Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Verdandi III is a side branch, a tool and experiment: the Micro through the Macro. Version 0.1.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
 ## Quick start
 

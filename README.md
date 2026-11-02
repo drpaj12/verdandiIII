@@ -5,6 +5,12 @@ Odin III pass by pass into a trace, then replay it as an interactive playthrough
 code, the data and the Verilog provenance of every step. Python 3.11+, `odin3` (cffi binding) for
 the recorder, PySide6 (extra `gui`) for the player. Verdandi III is part of **Yggdrasil III**, the suite of Odin III (<https://github.com/drpaj12/odin3>, the trunk), Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Verdandi III is a side branch, a tool and experiment: the Micro through the Macro. Version 0.1.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
+In short: a **recorder** (`verdandi record`) writes a trace with a snapshot after every step of four levels (stage, pass,
+sub-step, event), including the ABC stage opened into its commands; a **player** (`verdandi play`, extra `gui`) replays it with
+the Verilog provenance of each step, a Data pane, a Code pane and shipped notes that explain the stages. It is a teaching and
+inspection tool, not an experiment: it has no paper and no measured result. Manual: <https://drpaj12.github.io/verdandiIII/>.
+Hub: <https://github.com/drpaj12/YggdrasilIII>.
+
 ## Quick start
 
     verdandi record examples/playthrough/playthrough.v --top playthrough \

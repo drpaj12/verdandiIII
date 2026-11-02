@@ -15,6 +15,13 @@ the Code pane reads the Odin III source tree.
 This page walks the shipped example: record it, play it, and see what every level and every key
 shows. The one-page commands are also in `examples/playthrough/README.md`.
 
+## Features at a glance
+
+Works: the recorder (`verdandi record`), the four-level step tree, `info`, `check-notes`, the shipped notes and five examples.
+Optional (extra `gui`, Graphviz `dot`, a standalone ABC binary): the player (`verdandi play`) with its provenance badges,
+Data pane, Code pane and the ABC step replay. The table with status and links is in the
+[repository README](https://github.com/drpaj12/verdandiIII#features).
+
 ## Install
 
 Verdandi needs Python 3.11 or newer and the `odin3` Python binding. The player needs PySide6

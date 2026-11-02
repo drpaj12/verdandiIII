@@ -18,6 +18,25 @@ Five examples ship under `examples/`: `counter`, `register`, `multiplier`, `inst
 `playthrough` (the existing top that joins the first three). `examples/record-all.sh` checks
 each example's notes and records all five into `examples/<name>/trace`, smallest design first.
 
+## Features
+
+Status: **works** = on `main` with tests; **optional** = needs PySide6 (extra `gui`), Graphviz `dot` or a standalone ABC binary.
+
+| Feature | Status | Where |
+|---|---|---|
+| Recorder: runs a micro Verilog design through the Odin III pass sequence and writes a trace (source, a snapshot after every step, the diff, provenance spans, the code location of the pass, log lines); exit codes 0, 1 (a pass failed, trace kept up to it), 2 | works | `verdandi record`; [manual](docs/user/index.md) |
+| Four-level step tree: stage, pass, sub-step (for example the parts of `proc`, `opt` and `fsm`, and the Parse and Elaborate ASTs) and event (parsed from the pass's DEBUG log) | works | `verdandi record`; manual, "The levels" |
+| ABC stage opened into its commands (`strash`, `ifraig`, `scorr`, `dc2`, `dch`, `if`, `mfs2`) with node counts and graph pictures, replayed with a standalone ABC binary | optional (ABC binary; without it one pass step) | manual, "The ABC steps" |
+| Interactive player: stage map, step tree, Verilog, Code, Data and Explanation panes and a Diff strip; keys N, I, O, B, 1 to 9, Ctrl+F follow | optional (`gui`) | `verdandi play`; manual, "Play it" |
+| Provenance in the player: spans of touched objects highlighted in the Verilog pane, a source-line badge on every node and table row, click to open the source at that line | optional (`gui`) | manual, "Play it" |
+| Data pane: tables filtered to the touched objects, AST tree, symbol table, graph picture of the touched slice with net labels, structure badges and a colour diff | optional (`gui`; the picture needs Graphviz `dot`) | manual, "Play it" |
+| Code pane: the Odin III source file and function that runs the pass, with call depth and a directory zoom | optional (`gui`; needs an Odin III source tree) | manual, "Play it" |
+| Shipped notes explaining the stages, key passes and ABC commands, found by anchor | works | `verdandi/notes/odin3/` |
+| `check-notes`: checks every note anchor against the current Odin III source, exit 1 and a list when stale | works | `verdandi check-notes --odin3-root` |
+| `info`: step counts per level and snapshot sizes without a window | works | `verdandi info TRACE` |
+| Five examples (`counter`, `register`, `multiplier`, `instantiation`, `playthrough`) and a script that checks their notes and records all five | works | `examples/`, `examples/record-all.sh` |
+| Size guard (`--max-nodes`, default 5000) and deterministic snapshots; a trace is portable and read by the player without Odin III | works | manual, "Install" |
+
 ## Documentation
 
 Start at the Yggdrasil III hub; every manual links to the others.

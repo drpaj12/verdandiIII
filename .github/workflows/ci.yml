@@ -38,11 +38,12 @@ jobs:
 
   lint:
     needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || matrix.python == '3.12')
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ["3.11", "3.12"]
+        # PRs: 3.12 only; push to main: both.
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11","3.12"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,12 +55,13 @@ jobs:
 
   test:
     needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || matrix.python == '3.12')
+    if: needs.changes.outputs.code == 'true'
     # The Odin III wheel and source are pinned to v1.0.0; ABC tests skip without a binary.
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ["3.11", "3.12"]
+        # PRs: 3.12 only; push to main: both.
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11","3.12"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

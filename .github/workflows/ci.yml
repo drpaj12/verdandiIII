@@ -3,12 +3,42 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 env:
   ODIN3_WHEEL: https://github.com/drpaj12/odin3/releases/download/v1.0.0/odin3-1.0.0-py3-none-linux_x86_64.whl
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    # Drafts skip CI. A PR touching only docs/** and *.md reports code=false, so build/test jobs skip
+    # (a skipped job satisfies a required check); the docs job still runs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.f.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: f
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          code=true
+          if [ "$EVENT" = pull_request ]; then
+            if git diff --name-only "$BASE...$HEAD" | grep -qvE '^(docs/|.*\.md$)'; then code=true; else code=false; fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || matrix.python == '3.12')
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -23,6 +53,8 @@ jobs:
       - run: mypy --strict verdandi tests
 
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || matrix.python == '3.12')
     # The Odin III wheel and source are pinned to v1.0.0; ABC tests skip without a binary.
     runs-on: ubuntu-latest
     strategy:

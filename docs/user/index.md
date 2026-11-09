@@ -24,11 +24,18 @@ Data pane, Code pane and the ABC step replay. The table with status and links is
 
 ## Install
 
-Verdandi needs Python 3.11 or newer and the `odin3` Python binding. The player needs PySide6
-(extra `gui`); a standalone ABC binary and Graphviz `dot` are optional.
+Verdandi needs Python 3.11 or newer and the `odin3` Python binding of Odin III 1.6.0 (C ABI 7; the
+version this manual was checked against). The player needs PySide6 (extra `gui`); a standalone ABC
+binary and Graphviz `dot` are optional. `odin3` is not on PyPI, so `pip install -e ".[gui]"` cannot
+resolve it: install the Odin III release wheel first, or install Verdandi without dependencies and point
+the binding at an Odin III build (next block).
 
     python3 -m venv .venv
-    .venv/bin/pip install -e ".[gui]"
+    .venv/bin/pip install cffi PySide6-Essentials
+    .venv/bin/pip install --no-deps -e .
+
+Tools outside the suite (VTR for the architecture files, Graphviz, ABC) and their versions are on the hub's
+[tools page](https://github.com/drpaj12/YggdrasilIII/blob/main/docs/tools.md).
 
 To record against a local Odin III source tree, point the binding at it and keep the source tree
 handy for the code locator (the Code pane and `check-notes` read it):
@@ -71,7 +78,7 @@ used inside another: a parameterised counter instantiated twice at different wid
 gate module. `examples/record-all.sh` checks every example's notes with `verdandi check-notes`
 and records all five into `examples/<name>/trace`, smallest design first.
 
-With Odin III v1.0.0 and the k6 architecture the recording has 83 steps: 13 stages, 13 passes, 42
+With Odin III 1.6.0 and the k6 architecture the recording has 83 steps: 13 stages, 13 passes, 42
 sub-steps and 15 logged events. It exits 0. A pass that fails ends the recording with that step
 marked failed and its log kept, and exits 1; a usage or environment error exits 2.
 

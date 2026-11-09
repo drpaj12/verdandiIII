@@ -11,6 +11,14 @@ the Verilog provenance of each step, a Data pane, a Code pane and shipped notes 
 inspection tool, not an experiment: it has no paper and no measured result. Manual: <https://drpaj12.github.io/verdandiIII/>.
 Hub: <https://github.com/drpaj12/YggdrasilIII>.
 
+## Install
+
+Python 3.11+, the `odin3` Python binding of Odin III 1.6.0 (C ABI 7; checked against this version) and, for the
+player, PySide6. `odin3` is not on PyPI: install its release wheel, or `pip install cffi PySide6-Essentials`,
+`pip install --no-deps -e .` and set `ODIN3_ROOT`, `ODIN3_LIB` and `PYTHONPATH` as in the
+[manual](docs/user/index.md). Tools outside the suite and their versions: the hub's
+[tools page](https://github.com/drpaj12/YggdrasilIII/blob/main/docs/tools.md).
+
 ## Quick start
 
     verdandi record examples/playthrough/playthrough.v --top playthrough \

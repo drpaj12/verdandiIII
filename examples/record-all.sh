@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Record the five shipped examples, smallest design first, after checking their notes.
 #
-# The k6 VTR architecture is used when one is around ($VTR_ROOT, else the odin3-ws checkout),
-# else the LPM tech library ($ODIN3_ROOT/lib/lpm.o3lib). Paths resolve from this script, so it
+# The k6 VTR architecture is used when $VTR_ROOT names a VTR checkout that has it, else the LPM
+# tech library ($ODIN3_ROOT/lib/lpm.o3lib). Paths resolve from this script, so it
 # runs from any directory; each trace lands in examples/<name>/trace.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 verdandi=${VERDANDI:-verdandi}
 
-arch=${VTR_ROOT:-$HOME/odin3-ws/external/vtr-verilog-to-routing}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+arch=${VTR_ROOT:-/nonexistent}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
 if [[ -f $arch ]]; then
   source_args=(--arch "$arch")
 else

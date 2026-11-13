@@ -3,7 +3,7 @@
 Verdandi III: the Micro through the Macro. Record a micro Verilog design through the current
 Odin III pass by pass into a trace, then replay it as an interactive playthrough that shows the
 code, the data and the Verilog provenance of every step. Python 3.11+, `odin3` (cffi binding) for
-the recorder, PySide6 (extra `gui`) for the player. Verdandi III is part of **Yggdrasil III**, the suite of Odin III (<https://github.com/drpaj12/odin3>, the trunk), Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Verdandi III is a side branch, a tool and experiment: the Micro through the Macro. Version 0.1.0 (`pyproject.toml`; in the Yggdrasil III hub snapshot [v1.4.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.4.0/docs/versions.md)); Odin III 1.4.0. The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
+the recorder, PySide6 (extra `gui`) for the player. Verdandi III is part of **Yggdrasil III**, the suite of Odin III (<https://github.com/drpaj12/odin3>, the trunk), Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III) and Heimdall III (<https://github.com/drpaj12/heimdallIII>, the canopy viewer), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>), Verdandi III (<https://github.com/drpaj12/verdandiIII>) and Leman Russ III (<https://github.com/drpaj12/lemanrussIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Verdandi III is a side branch, a tool and experiment: the Micro through the Macro. Version 0.1.0 (`pyproject.toml`; in the Yggdrasil III hub snapshot [v1.6.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.6.0/docs/versions.md); Odin III 1.6.0). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
 In short: a **recorder** (`verdandi record`) writes a trace with a snapshot after every step of four levels (stage, pass,
 sub-step, event), including the ABC stage opened into its commands; a **player** (`verdandi play`, extra `gui`) replays it with
@@ -65,7 +65,7 @@ Start at the Yggdrasil III hub; every manual links to the others.
 - [Loki III manual](https://drpaj12.github.io/loki/).
 - [Verdandi III manual](https://drpaj12.github.io/verdandiIII/): this tool, with the shipped
   [playthrough example](examples/playthrough/README.md).
-- [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan and paper under `docs/`).
+- [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan under `docs/`; its paper is kept locally by the author).
 - [Set up the whole suite](https://drpaj12.github.io/YggdrasilIII/getting-started.html) on a clean Linux or
   Windows machine, and [drive it with Claude Code](https://drpaj12.github.io/YggdrasilIII/ai-agent.html).
 
